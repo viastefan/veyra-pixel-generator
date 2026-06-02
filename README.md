@@ -1,12 +1,14 @@
 # Veyra Pixel Generator
 
-Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft komplett lokal im Browser, lädt Bilder, erzeugt aus Prompts modulare Motive, erlaubt manuelles Pixelzeichnen und exportiert PNG, SVG, statisches HTML oder Smart-Motion-HTML.
+Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft lokal im Browser, lädt Bilder, erzeugt aus Prompts modulare Motive, erlaubt manuelles Pixelzeichnen, schlägt Logo-Alternativen vor und exportiert PNG, SVG, HTML, Smart-Motion-HTML oder WebM-Video.
 
 ## Funktionen
 
 - Bild laden, per Drag and Drop ablegen oder aus der Zwischenablage einfügen
 - PNG, JPG, JPEG, WEBP und browserunterstützte SVGs
 - Prompt-zu-Motiv mit optionaler Claude-API über Vercel
+- Logo Lab mit 16 Alternativen aus Prompt und aktueller Pixel-Skizze
+- Optionaler Claude-Endpunkt für kreative Logo-Briefs statt starrer Vorlagen
 - Sofort nutzbarer lokaler Motiv-Fallback ohne API-Key
 - Deutsche Oberfläche
 - Canvas-basierte Bildanalyse mit Raster, Schwelle, Kontrast und Elementgröße
@@ -18,13 +20,14 @@ Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App
 - Klarer Zeichnen-an/aus-Schalter direkt über der Canvas
 - `Zurück`-Button für die wichtigsten Editor-Schritte
 - Favoriten mit lokaler Browser-Speicherung für starke Zwischenstände
-- Logo-Vorlagen, 1000-Mix-Randomizer und 4er Logo-Serien mit anklickbaren Varianten
+- Logo-Vorlagen, 1000-Mix-Randomizer und 16er Logo-Alternativen mit anklickbaren Varianten
 - Look-Presets, Reset und subtile Zufallsabstimmung
 - Smart-Motion-Live-Vorschau direkt in der App
 - PNG-Export für hochauflösende Rasterdateien
 - SVG-Export mit editierbaren `rect`- und `circle`-Elementen für Figma
 - Statischer HTML-Export mit eingebettetem SVG
 - Smart-Motion-HTML: viele Pixel verdichten sich automatisch zu einem reduzierten Mark
+- Smart-Motion-WebM-Videoexport ohne externe Bildschirmaufnahme
 - SVG in die Zwischenablage kopieren
 
 ## Installation
@@ -56,16 +59,16 @@ Der Produktions-Build landet in `dist/`.
 3. Im Bereich `Smart Motion` die Bewegung direkt ansehen oder mit `Replay` neu abspielen.
 4. Im Bereich `Pixel zeichnen` den Zeichenmodus aktivieren und mit ✏️, 🌫️, 🧽 oder 📏 arbeiten.
 5. Gute Varianten mit `Merken` als Favorit speichern und später wieder laden.
-6. Über `Logo-Vorlagen`, `1000 Mix` oder `4er Logo-Serie würfeln` neue Markenrichtungen erzeugen.
+6. Über `Logo-Vorlagen`, `1000 Mix` oder `16 Logo-Alternativen` neue Markenrichtungen erzeugen.
 7. Rastergröße, Elementgröße, Schwelle, Kontrast, Form und Farben fein einstellen.
 8. Mit `Pixelruhe` störende Einzelpixel reduzieren oder mehr feine Details zulassen.
-9. Mit `PNG`, `SVG`, `HTML` oder `Smart-Motion HTML` exportieren.
+9. Mit `PNG`, `SVG`, `HTML`, `Smart-Motion HTML` oder `Video` exportieren.
 
 ## Kommerzielle Nutzung
 
 Der App-Code steht unter der MIT-Lizenz und kann kommerziell genutzt, verändert und weitergegeben werden. Die lokal erzeugten Motive verwenden keine externen Bildassets. Wenn Claude über `ANTHROPIC_API_KEY` aktiviert wird, gelten zusätzlich die Nutzungsbedingungen des jeweiligen Modellanbieters für diese generierten Inhalte.
 
-Bildverarbeitung und Exporte laufen im Browser. Die Claude-Motivgenerierung ist optional und läuft über die Vercel-API-Funktion, damit der API-Key nicht im Browser landet.
+Bildverarbeitung und Exporte laufen im Browser. Die Claude-Motivgenerierung und Claude-Logo-Briefs sind optional und laufen über Vercel-API-Funktionen, damit der API-Key nicht im Browser landet.
 
 ## Claude-Motivgenerierung
 
@@ -81,4 +84,4 @@ Optional:
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
 ```
 
-Ohne `ANTHROPIC_API_KEY` bleibt die App vollständig nutzbar und verwendet den lokalen Prompt-Fallback.
+Ohne `ANTHROPIC_API_KEY` bleibt die App vollständig nutzbar und verwendet lokale Prompt- und Logo-Lab-Fallbacks.

@@ -326,11 +326,12 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .prompt-style-control {
-  flex: 1;
+  flex: 1 1 260px;
   grid-auto-columns: 1fr;
 }
 

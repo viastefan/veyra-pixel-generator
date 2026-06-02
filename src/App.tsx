@@ -12,6 +12,7 @@ import { downloadPng } from './utils/pngExport'
 import { createLocalPromptSvg } from './utils/promptMotif'
 import { downloadSvg, generateSvg } from './utils/svgExport'
 import { downloadAnimatedHtml, downloadHtml, getSmartMotionPlan } from './utils/htmlExport'
+import { downloadSmartMotionVideo } from './utils/videoExport'
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
 const IMAGE_INPUT_ID = 'veyra-image-input'
@@ -28,7 +29,14 @@ type LogoRecipe = {
   style: MotifStyle
   settings: Partial<GeneratorSettings>
 }
-type LogoVariant = LogoRecipe & {
+type LogoBrief = {
+  name: string
+  prompt: string
+  style: MotifStyle
+  settings?: Partial<GeneratorSettings>
+}
+type LogoVariant = LogoBrief & {
+  settings: Partial<GeneratorSettings>
   id: string
   svg: string
   previewUrl: string
@@ -742,6 +750,8 @@ function App() {
   const [motifStyle, setMotifStyle] = useState<MotifStyle>('monogram')
   const [motifVariant, setMotifVariant] = useState(0)
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false)
+  const [isGeneratingLogoLab, setIsGeneratingLogoLab] = useState(false)
+  const [isExportingVideo, setIsExportingVideo] = useState(false)
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState('')
   const [sourceSvg, setSourceSvg] = useState('')
   const [sourceLabel, setSourceLabel] = useState('Keine Quelle geladen')
@@ -1441,6 +1451,24 @@ function App() {
     setStatus('Animations-HTML heruntergeladen.')
   }
 
+  const handleExportVideo = async () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    try {
+      setIsExportingVideo(true)
+      setStatus('Smart-Motion Video wird gerendert...')
+      await downloadSmartMotionVideo(activeGrid, settings)
+      setStatus('Smart-Motion Video heruntergeladen.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Video-Export fehlgeschlagen.')
+    } finally {
+      setIsExportingVideo(false)
+    }
+  }
+
   const replayMotionPreview = () => {
     if (!hasArtwork) {
       setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
@@ -1522,33 +1550,34 @@ function App() {
     }))
   }
 
-  const buildLogoSettings = (recipe: LogoRecipe, randomize = false): Partial<GeneratorSettings> => {
+  const buildLogoSettings = (recipe: LogoBrief, randomize = false): Partial<GeneratorSettings> => {
     const randomBoost = randomize ? Math.random() : 0
+    const baseSettings = recipe.settings ?? LOGO_RECIPES.find((candidate) => candidate.style === recipe.style)?.settings ?? {}
 
     return {
-      ...recipe.settings,
+      ...baseSettings,
       gridSize: Math.round(
-        clampNumber((recipe.settings.gridSize ?? settings.gridSize) + (randomize ? (randomBoost - 0.5) * 16 : 0), 24, 72),
+        clampNumber((baseSettings.gridSize ?? settings.gridSize) + (randomize ? (randomBoost - 0.5) * 16 : 0), 24, 72),
       ),
       elementSize: Math.round(
-        clampNumber((recipe.settings.elementSize ?? settings.elementSize) + (randomize ? (Math.random() - 0.5) * 18 : 0), 56, 98),
+        clampNumber((baseSettings.elementSize ?? settings.elementSize) + (randomize ? (Math.random() - 0.5) * 18 : 0), 56, 98),
       ),
       smallSquareRatio: Math.round(
-        clampNumber((recipe.settings.smallSquareRatio ?? settings.smallSquareRatio) + (randomize ? (Math.random() - 0.5) * 26 : 0), 12, 62),
+        clampNumber((baseSettings.smallSquareRatio ?? settings.smallSquareRatio) + (randomize ? (Math.random() - 0.5) * 26 : 0), 12, 62),
       ),
       threshold: Math.round(
-        clampNumber((recipe.settings.threshold ?? settings.threshold) + (randomize ? (Math.random() - 0.5) * 14 : 0), 24, 58),
+        clampNumber((baseSettings.threshold ?? settings.threshold) + (randomize ? (Math.random() - 0.5) * 14 : 0), 24, 58),
       ),
       contrast: Math.round(
-        clampNumber((recipe.settings.contrast ?? settings.contrast) + (randomize ? (Math.random() - 0.5) * 48 : 0), 96, 196),
+        clampNumber((baseSettings.contrast ?? settings.contrast) + (randomize ? (Math.random() - 0.5) * 48 : 0), 96, 196),
       ),
       pixelSmoothing: Math.round(
-        clampNumber((recipe.settings.pixelSmoothing ?? settings.pixelSmoothing) + (randomize ? (Math.random() - 0.5) * 32 : 0), 24, 78),
+        clampNumber((baseSettings.pixelSmoothing ?? settings.pixelSmoothing) + (randomize ? (Math.random() - 0.5) * 32 : 0), 24, 78),
       ),
     }
   }
 
-  const createLogoVariant = (recipe: LogoRecipe, variant: number, randomize = true): LogoVariant => {
+  const createLogoVariant = (recipe: LogoBrief, variant: number, randomize = true): LogoVariant => {
     const svg = createLocalPromptSvg(recipe.prompt, { style: recipe.style, variant })
 
     return {
@@ -1599,7 +1628,7 @@ function App() {
       `${recipe.name} Vorlage`,
       { skipUndo: true },
     )
-    setLogoVariants((current) => [logoVariant, ...current.filter((variant) => variant.id !== logoVariant.id)].slice(0, 8))
+    setLogoVariants((current) => [logoVariant, ...current.filter((variant) => variant.id !== logoVariant.id)].slice(0, 16))
     setMotionPlayKey((current) => current + 1)
     setStatus(`${recipe.name} erzeugt. Feinjustieren, zeichnen oder Smart Motion ansehen.`)
   }
@@ -1611,16 +1640,104 @@ function App() {
     void applyLogoRecipe(recipe, { randomize: true, variant: nextCursor + Math.floor(Math.random() * 1000) })
   }
 
-  const generateLogoSeries = () => {
-    const nextCursor = logoRecipeCursor + 10
-    const variants = Array.from({ length: 4 }, (_, index) => {
-      const recipe = LOGO_RECIPES[Math.floor(Math.random() * LOGO_RECIPES.length)]
-      return createLogoVariant(recipe, nextCursor + index + Math.floor(Math.random() * 900))
+  const getSketchSummary = () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      return 'Keine Skizze aktiv. Arbeite aus Prompt und Veyra/Festag Markenrichtung.'
+    }
+
+    const rows = activeGrid.elements.map((element) => element.row)
+    const columns = activeGrid.elements.map((element) => element.column)
+    const primary = activeGrid.elements.filter((element) => element.tone === 'primary').length
+    const secondary = activeGrid.elements.length - primary
+    const density = Math.round((activeGrid.elements.length / (activeGrid.gridSize * activeGrid.gridSize)) * 100)
+
+    return [
+      `${activeGrid.elements.length} Pixel auf ${activeGrid.gridSize}er Raster`,
+      `${density}% Dichte`,
+      `Bounds Zeilen ${Math.min(...rows)}-${Math.max(...rows)}, Spalten ${Math.min(...columns)}-${Math.max(...columns)}`,
+      `${primary} hell, ${secondary} gedämpft`,
+      `${manualPixelCount} manuelle Pixel`,
+      sourceLabel,
+    ].join('; ')
+  }
+
+  const getFallbackLogoBriefs = (count: number, sketchSummary: string): LogoBrief[] =>
+    Array.from({ length: count }, (_, index) => {
+      const recipe = LOGO_RECIPES[(logoRecipeCursor + index) % LOGO_RECIPES.length]
+      const direction = ['Core', 'Seal', 'Arc', 'Signal', 'Gate', 'Node', 'Crest', 'Orbit'][index % 8]
+
+      return {
+        ...recipe,
+        name: `${recipe.name} ${direction}`,
+        prompt: `${prompt}. ${recipe.prompt}. Aus Skizze ableiten: ${sketchSummary}. Richtung ${index + 1}.`,
+      }
     })
 
+  const requestClaudeLogoBriefs = async (sketchSummary: string) => {
+    const response = await fetch('/api/generate-logo-briefs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        style: motifStyle,
+        sketchSummary,
+        count: 16,
+      }),
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = (await response.json()) as { briefs?: LogoBrief[]; source?: string }
+
+    if (!Array.isArray(data.briefs) || !data.briefs.length) {
+      return null
+    }
+
+    return {
+      briefs: data.briefs
+        .filter((brief) => brief.name && brief.prompt && brief.style)
+        .map((brief, index) => ({
+          ...brief,
+          settings: LOGO_RECIPES[index % LOGO_RECIPES.length].settings,
+        }))
+        .slice(0, 16),
+      source: data.source,
+    }
+  }
+
+  const generateLogoSeries = async () => {
+    const nextCursor = logoRecipeCursor + 16
+    const sketchSummary = getSketchSummary()
+
     setLogoRecipeCursor(nextCursor)
-    setLogoVariants(variants)
-    setStatus('Vier Logo-Varianten erzeugt. Wähle eine Karte aus.')
+    setIsGeneratingLogoLab(true)
+    setStatus('Logo Lab erstellt 16 Alternativen aus Prompt und Skizze...')
+
+    try {
+      const claudeResult = await requestClaudeLogoBriefs(sketchSummary)
+      const briefs = claudeResult?.briefs.length ? claudeResult.briefs : getFallbackLogoBriefs(16, sketchSummary)
+      const variants = briefs.slice(0, 16).map((brief, index) =>
+        createLogoVariant(brief, nextCursor + index + Math.floor(Math.random() * 900), true),
+      )
+
+      setLogoVariants(variants)
+      setStatus(
+        claudeResult?.source === 'claude'
+          ? 'Claude hat 16 Logo-Richtungen vorgeschlagen. Wähle eine aus.'
+          : '16 Logo-Alternativen lokal erzeugt. Wähle eine aus.',
+      )
+    } catch {
+      const variants = getFallbackLogoBriefs(16, sketchSummary).map((brief, index) =>
+        createLogoVariant(brief, nextCursor + index + Math.floor(Math.random() * 900), true),
+      )
+
+      setLogoVariants(variants)
+      setStatus('16 Logo-Alternativen lokal erzeugt. Claude ist optional.')
+    } finally {
+      setIsGeneratingLogoLab(false)
+    }
   }
 
   const randomizeSettings = () => {
@@ -1706,6 +1823,9 @@ function App() {
           <button className="button button-motion" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
             Smart Motion
           </button>
+          <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
+            {isExportingVideo ? 'Video...' : 'Video'}
+          </button>
         </div>
       </header>
 
@@ -1748,6 +1868,14 @@ function App() {
                 </div>
                 <button className="button" type="button" onClick={generateNextVariant} disabled={isGeneratingPrompt || !prompt.trim()}>
                   Neue Variante
+                </button>
+                <button
+                  className="button button-motion"
+                  type="button"
+                  disabled={isGeneratingLogoLab}
+                  onClick={() => void generateLogoSeries()}
+                >
+                  {isGeneratingLogoLab ? 'Denkt...' : '16 Alternativen'}
                 </button>
               </div>
             </div>
@@ -1857,9 +1985,14 @@ function App() {
               </button>
             </div>
             <MotionPreview grid={activeGrid} settings={settings} playKey={motionPlayKey} />
-            <button className="button button-motion full-width" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
-              Smart-Motion HTML exportieren
-            </button>
+            <div className="export-grid">
+              <button className="button button-motion" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
+                Motion HTML
+              </button>
+              <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
+                {isExportingVideo ? 'Rendert...' : 'Video WebM'}
+              </button>
+            </div>
           </section>
 
           <section className="control-section">
@@ -1956,8 +2089,13 @@ function App() {
             <button className="button button-primary full-width" type="button" onClick={generateRandomLogoRecipe}>
               Logo random generieren
             </button>
-            <button className="button full-width" type="button" onClick={generateLogoSeries}>
-              4er Logo-Serie würfeln
+            <button
+              className="button button-motion full-width"
+              type="button"
+              disabled={isGeneratingLogoLab}
+              onClick={() => void generateLogoSeries()}
+            >
+              {isGeneratingLogoLab ? 'Logo Lab denkt...' : '16 Logo-Alternativen'}
             </button>
             {logoVariants.length > 0 && (
               <div className="logo-variant-grid" aria-label="Logo-Varianten">
@@ -2149,6 +2287,9 @@ function App() {
               </button>
               <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportHtml}>
                 HTML
+              </button>
+              <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
+                {isExportingVideo ? 'Video...' : 'Video'}
               </button>
               <button className="button full-width-button" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
                 Smart-Motion HTML
