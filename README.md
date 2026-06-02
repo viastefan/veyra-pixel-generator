@@ -1,11 +1,12 @@
 # Veyra Pixel Generator
 
-Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft lokal im Browser, lädt Bilder, erzeugt aus Prompts modulare Motive, erlaubt manuelles Pixelzeichnen, schlägt Logo-Alternativen vor und exportiert PNG, SVG, HTML, Brand-Kit-HTML, Smart-Motion-HTML oder WebM-Video.
+Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft lokal im Browser, lädt Bilder, erzeugt aus Prompts oder Text modulare Motive, erlaubt manuelles Pixelzeichnen, schlägt Logo-Alternativen vor und exportiert PNG, SVG, HTML, Brand-Kit-HTML, Motion-Sequenzen, Smart-Motion-HTML oder WebM-Rohvideo.
 
 ## Funktionen
 
 - Bild laden, per Drag and Drop ablegen oder aus der Zwischenablage einfügen
 - PNG, JPG, JPEG, WEBP und browserunterstützte SVGs
+- Text zu Pixel mit optionalem TTF-/OTF-Schriftupload
 - Prompt-zu-Motiv mit optionaler Claude-API über Vercel
 - Logo Lab mit 16 Alternativen aus Prompt und aktueller Pixel-Skizze
 - Optionaler Claude-Endpunkt für kreative Logo-Briefs statt starrer Vorlagen
@@ -27,6 +28,7 @@ Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App
 - SVG-Export mit editierbaren `rect`- und `circle`-Elementen für Figma
 - Statischer HTML-Export mit eingebettetem SVG
 - Brand-Kit-HTML mit Logo, Palette, Specs, Usage Checks und editierbarem SVG-Code
+- Motion-Sequenz-HTML mit Start-, Mittel- und Endframe plus AI-/Motion-Brief
 - Smart-Motion-HTML: viele Pixel verdichten sich automatisch zu einem reduzierten Mark
 - Smart-Motion-WebM-Videoexport ohne externe Bildschirmaufnahme
 - SVG in die Zwischenablage kopieren
@@ -45,6 +47,12 @@ npm run dev
 
 Danach die angezeigte Vite-URL im Browser öffnen.
 
+Die vorgeschaltete Produktwebsite läuft auf:
+
+```bash
+/homepage
+```
+
 ## Build
 
 ```bash
@@ -55,7 +63,7 @@ Der Produktions-Build landet in `dist/`.
 
 ## Workflow
 
-1. Prompt eingeben, Bild laden, Bild einfügen oder mit `Leeres Raster` direkt zeichnen.
+1. Prompt eingeben, Text pixeln, Bild laden, Bild einfügen oder mit `Leeres Raster` direkt zeichnen.
 2. Mit `Pixelmark erzeugen` ein KI-/Fallback-Motiv erstellen oder das Raster manuell bearbeiten.
 3. Im Bereich `Smart Motion` die Bewegung direkt ansehen oder mit `Replay` neu abspielen.
 4. Im Bereich `Pixel zeichnen` den Zeichenmodus aktivieren und mit ✏️, 🌫️, 🧽 oder 📏 arbeiten.
@@ -63,7 +71,7 @@ Der Produktions-Build landet in `dist/`.
 6. Über `Logo-Vorlagen`, `1000 Mix` oder `16 Logo-Alternativen` neue Markenrichtungen erzeugen.
 7. Rastergröße, Elementgröße, Schwelle, Kontrast, Form und Farben fein einstellen.
 8. Mit `Pixelruhe` störende Einzelpixel reduzieren oder mehr feine Details zulassen.
-9. Mit `PNG`, `SVG`, `HTML`, `Brand Kit`, `Smart-Motion HTML` oder `Video` exportieren.
+9. Mit `PNG`, `SVG`, `HTML`, `Brand Kit`, `Motion Sequenz`, `Smart-Motion HTML` oder `WebM roh` exportieren.
 
 ## Kommerzielle Nutzung
 

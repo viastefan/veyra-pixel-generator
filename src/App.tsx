@@ -14,10 +14,13 @@ import { downloadSvg, generateSvg } from './utils/svgExport'
 import { downloadAnimatedHtml, downloadHtml, getSmartMotionPlan } from './utils/htmlExport'
 import { downloadSmartMotionVideo } from './utils/videoExport'
 import { downloadBrandKitHtml } from './utils/brandKitExport'
+import { downloadMotionSequenceHtml, generateMotionSequencePrompt } from './utils/motionSequenceExport'
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
 const IMAGE_INPUT_ID = 'veyra-image-input'
+const TEXT_FONT_INPUT_ID = 'veyra-text-font-input'
 const ACCEPTED_IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|svg)$/i
+const ACCEPTED_FONT_EXTENSIONS = /\.(ttf|otf)$/i
 const FAVORITES_STORAGE_KEY = 'veyra-pixel-generator:favorites'
 const MAX_FAVORITES = 10
 type DrawTool = 'primary' | 'secondary' | 'erase' | 'line'
@@ -263,6 +266,23 @@ function isSupportedImage(file: File) {
   return ACCEPTED_IMAGE_EXTENSIONS.test(file.name)
 }
 
+function isSupportedFont(file: File) {
+  return ACCEPTED_FONT_EXTENSIONS.test(file.name)
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png') {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob)
+        return
+      }
+
+      reject(new Error('Canvas konnte keine Bilddatei erzeugen.'))
+    }, type)
+  })
+}
+
 function createImageFromBlob(blob: Blob) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(blob)
@@ -380,7 +400,17 @@ function createBlankGrid(settings: GeneratorSettings): GeneratedGrid {
 }
 
 function getManualElement(grid: GeneratedGrid, settings: GeneratorSettings, cell: GridCell, tone: 'primary' | 'secondary') {
-  const size = grid.cellSize * clampNumber(settings.elementSize / 100, 0.08, 1)
+  const threshold = clampNumber(settings.threshold / 100, 0.01, 0.99)
+  const elementRatio = clampNumber(settings.elementSize / 100, 0.08, 1)
+  const minRatio = clampNumber(settings.smallSquareRatio / 100, 0.05, 1)
+  const strength = tone === 'primary' ? 0.9 : 0.58
+
+  if (strength < threshold) {
+    return null
+  }
+
+  const normalizedStrength = clampNumber((strength - threshold) / (1 - threshold), 0, 1)
+  const size = grid.cellSize * elementRatio * (minRatio + normalizedStrength * (1 - minRatio))
   const color = tone === 'primary' ? settings.primaryColor : settings.secondaryColor
 
   return {
@@ -391,7 +421,7 @@ function getManualElement(grid: GeneratedGrid, settings: GeneratorSettings, cell
     y: grid.padding + cell.row * grid.cellSize + grid.cellSize / 2,
     size,
     brightness: tone === 'primary' ? 0 : 0.36,
-    strength: tone === 'primary' ? 1 : 0.62,
+    strength,
     tone,
     color,
   }
@@ -410,7 +440,12 @@ function applyManualPixels(grid: GeneratedGrid, edits: ManualPixelMap, settings:
     }
 
     if (edit === 'primary' || edit === 'secondary') {
-      editedElements.push(getManualElement(grid, settings, element, edit))
+      const manualElement = getManualElement(grid, settings, element, edit)
+
+      if (manualElement) {
+        editedElements.push(manualElement)
+      }
+
       continue
     }
 
@@ -428,7 +463,11 @@ function applyManualPixels(grid: GeneratedGrid, edits: ManualPixelMap, settings:
       continue
     }
 
-    editedElements.push(getManualElement(grid, settings, cell, edit))
+    const manualElement = getManualElement(grid, settings, cell, edit)
+
+    if (manualElement) {
+      editedElements.push(manualElement)
+    }
   }
 
   return {
@@ -622,14 +661,30 @@ function SliderControl({
   suffix?: string
   onChange: (value: number) => void
 }) {
+  const updateValue = (nextValue: number) => {
+    if (!Number.isFinite(nextValue)) {
+      return
+    }
+
+    onChange(Math.min(max, Math.max(min, nextValue)))
+  }
+
   return (
     <label className="control">
       <span className="control-row">
         <span>{label}</span>
-        <strong>
-          {value}
-          {suffix}
-        </strong>
+        <span className="slider-value">
+          <input
+            aria-label={`${label} Wert`}
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(event) => updateValue(Number(event.target.value))}
+          />
+          {suffix && <span>{suffix}</span>}
+        </span>
       </span>
       <input
         type="range"
@@ -637,7 +692,7 @@ function SliderControl({
         max={max}
         step={step}
         value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event) => updateValue(Number(event.target.value))}
       />
     </label>
   )
@@ -753,6 +808,11 @@ function App() {
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false)
   const [isGeneratingLogoLab, setIsGeneratingLogoLab] = useState(false)
   const [isExportingVideo, setIsExportingVideo] = useState(false)
+  const [textSourceValue, setTextSourceValue] = useState('VEYRA')
+  const [textFontFamily, setTextFontFamily] = useState('Inter, ui-sans-serif, system-ui, sans-serif')
+  const [textFontLabel, setTextFontLabel] = useState('Systemschrift')
+  const [isLoadingTextFont, setIsLoadingTextFont] = useState(false)
+  const [motionPrompt, setMotionPrompt] = useState('ruhiges Verdichten von vielen Pixeln zu einem klaren Premium-Mark')
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState('')
   const [sourceSvg, setSourceSvg] = useState('')
   const [sourceLabel, setSourceLabel] = useState('Keine Quelle geladen')
@@ -773,6 +833,7 @@ function App() {
   const [status, setStatus] = useState('Bild laden, einfügen oder direkt zeichnen.')
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const textFontInputRef = useRef<HTMLInputElement | null>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const processingCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const dragDepthRef = useRef(0)
@@ -931,6 +992,114 @@ function App() {
     }
 
     event.target.value = ''
+  }
+
+  const handleTextFontInput = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    if (!isSupportedFont(file)) {
+      setStatus('Nutze eine TTF- oder OTF-Schriftdatei.')
+      event.target.value = ''
+      return
+    }
+
+    if (!('FontFace' in window)) {
+      setStatus('Dieser Browser kann Schriftdateien nicht direkt laden.')
+      event.target.value = ''
+      return
+    }
+
+    try {
+      setIsLoadingTextFont(true)
+      setStatus(`${file.name} wird als Schrift geladen...`)
+      const dataUrl = await readBlobAsDataUrl(file)
+      const familyName = `VeyraTextFont${Date.now()}`
+      const fontFace = new FontFace(familyName, `url(${dataUrl})`)
+      const loadedFont = await fontFace.load()
+      document.fonts.add(loadedFont)
+      setTextFontFamily(`"${familyName}"`)
+      setTextFontLabel(file.name)
+      setStatus(`${file.name} geladen. Text kann jetzt gepixelt werden.`)
+    } catch {
+      setStatus('Schrift konnte nicht geladen werden.')
+    } finally {
+      setIsLoadingTextFont(false)
+      event.target.value = ''
+    }
+  }
+
+  const createTextPixelSource = async () => {
+    const lines = textSourceValue
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 4)
+
+    if (!lines.length) {
+      setStatus('Schreibe zuerst einen Text.')
+      return
+    }
+
+    try {
+      if ('fonts' in document) {
+        await document.fonts.ready
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = 1200
+      canvas.height = 1200
+
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        throw new Error('Text-Canvas konnte nicht erstellt werden.')
+      }
+
+      context.fillStyle = '#f6f8fb'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+
+      let fontSize = lines.length > 1 ? 250 : 340
+      const maxWidth = 940
+      const maxHeight = 760
+
+      while (fontSize > 72) {
+        context.font = `760 ${fontSize}px ${textFontFamily}`
+        const widestLine = Math.max(...lines.map((line) => context.measureText(line).width))
+        const totalHeight = lines.length * fontSize * 1.08
+
+        if (widestLine <= maxWidth && totalHeight <= maxHeight) {
+          break
+        }
+
+        fontSize -= 8
+      }
+
+      const lineHeight = fontSize * 1.08
+      const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2
+
+      context.font = `760 ${fontSize}px ${textFontFamily}`
+      context.textAlign = 'center'
+      context.textBaseline = 'middle'
+      context.fillStyle = '#101821'
+
+      for (const [index, line] of lines.entries()) {
+        context.fillText(line, canvas.width / 2, startY + index * lineHeight)
+      }
+
+      const blob = await canvasToBlob(canvas)
+      const file = new File([blob], 'veyra-text-source.png', { type: 'image/png' })
+      await loadImageFile(file, { sourceLabel: 'Textquelle' })
+      const label = lines.join(' / ').slice(0, 64)
+      setSourceLabel(`Textquelle: ${label}`)
+      setImageName(`${label} · ${textFontLabel}`)
+      setStatus('Textquelle erzeugt. Du kannst sie pixeln, animieren und exportieren.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Textquelle konnte nicht erzeugt werden.')
+    }
   }
 
   const openFilePicker = () => {
@@ -1470,6 +1639,33 @@ function App() {
     setStatus('Animations-HTML heruntergeladen.')
   }
 
+  const handleExportMotionSequence = () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    downloadMotionSequenceHtml(activeGrid, settings, {
+      prompt: motionPrompt,
+      sourceLabel,
+    })
+    setStatus('Motion-Sequenz mit drei Frames heruntergeladen.')
+  }
+
+  const handleCopyMotionPrompt = async () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(generateMotionSequencePrompt({ prompt: motionPrompt, sourceLabel }))
+      setStatus('Motion-Brief in die Zwischenablage kopiert.')
+    } catch {
+      setStatus('Keine Berechtigung zum Schreiben in die Zwischenablage.')
+    }
+  }
+
   const handleExportVideo = async () => {
     if (!activeGrid || !activeGrid.elements.length) {
       setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
@@ -1791,6 +1987,14 @@ function App() {
         accept={ACCEPTED_IMAGE_TYPES.join(',')}
         onChange={handleFileInput}
       />
+      <input
+        id={TEXT_FONT_INPUT_ID}
+        ref={textFontInputRef}
+        className="file-input"
+        type="file"
+        accept=".ttf,.otf,font/ttf,font/otf"
+        onChange={handleTextFontInput}
+      />
 
       <header className="topbar">
         <div className="brand">
@@ -1845,8 +2049,8 @@ function App() {
           <button className="button button-motion" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
             Smart Motion
           </button>
-          <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
-            {isExportingVideo ? 'Video...' : 'Video'}
+          <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportMotionSequence}>
+            Motion Sequenz
           </button>
         </div>
       </header>
@@ -1999,6 +2203,27 @@ function App() {
             </div>
           </section>
 
+          <section className="control-section">
+            <h3>Text zu Pixel</h3>
+            <div className="text-source-panel">
+              <textarea
+                value={textSourceValue}
+                rows={3}
+                onChange={(event) => setTextSourceValue(event.target.value)}
+                placeholder="Text oder Wortmarke eingeben"
+              />
+              <div className="text-source-actions">
+                <label className="button" htmlFor={TEXT_FONT_INPUT_ID}>
+                  {isLoadingTextFont ? 'Lädt...' : 'TTF/OTF laden'}
+                </label>
+                <button className="button button-primary" type="button" onClick={() => void createTextPixelSource()}>
+                  Text pixeln
+                </button>
+              </div>
+              <p>{textFontLabel}</p>
+            </div>
+          </section>
+
           <section className="control-section motion-control-section">
             <div className="section-heading-row">
               <h3>Smart Motion</h3>
@@ -2007,12 +2232,28 @@ function App() {
               </button>
             </div>
             <MotionPreview grid={activeGrid} settings={settings} playKey={motionPlayKey} />
+            <div className="motion-brief-panel">
+              <textarea
+                value={motionPrompt}
+                rows={3}
+                onChange={(event) => setMotionPrompt(event.target.value)}
+                placeholder="Beschreibe die Bewegung: ruhig verdichten, Rotation, finaler Hold..."
+              />
+              <div className="export-grid">
+                <button className="button button-primary" type="button" disabled={!hasArtwork} onClick={handleExportMotionSequence}>
+                  3 Frames exportieren
+                </button>
+                <button className="button" type="button" disabled={!hasArtwork} onClick={() => void handleCopyMotionPrompt()}>
+                  Brief kopieren
+                </button>
+              </div>
+            </div>
             <div className="export-grid">
               <button className="button button-motion" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
                 Motion HTML
               </button>
               <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
-                {isExportingVideo ? 'Rendert...' : 'Video WebM'}
+                {isExportingVideo ? 'Rendert...' : 'WebM roh'}
               </button>
             </div>
           </section>
@@ -2090,7 +2331,7 @@ function App() {
               </button>
             </div>
             <p className="draw-hint">
-              {manualPixelCount} manuelle Pixel. Mit ✏️ und 🌫️ zeichnest du frei, 📏 setzt gerade Pixellinien.
+              {manualPixelCount} manuelle Pixel. Schwelle reduziert Zeichnungen mit, Schatten verschwinden früher.
             </p>
           </section>
 
@@ -2313,8 +2554,11 @@ function App() {
               <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportBrandKit}>
                 Brand Kit
               </button>
+              <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportMotionSequence}>
+                Motion Sequenz
+              </button>
               <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
-                {isExportingVideo ? 'Video...' : 'Video'}
+                {isExportingVideo ? 'Video...' : 'WebM roh'}
               </button>
               <button className="button full-width-button" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
                 Smart-Motion HTML
