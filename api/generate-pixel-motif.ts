@@ -15,6 +15,7 @@ type ClaudeTextBlock = {
 }
 
 const fallbackModel = 'claude-sonnet-4-20250514'
+const allowedStyles = new Set(['monogram', 'emblem', 'orbital', 'signal'])
 
 function parsePrompt(body: unknown) {
   if (typeof body === 'string') {
@@ -31,6 +32,24 @@ function parsePrompt(body: unknown) {
 
   const prompt = (body as { prompt?: unknown }).prompt
   return typeof prompt === 'string' ? prompt.trim().slice(0, 500) : ''
+}
+
+function parseStyle(body: unknown) {
+  if (!body || typeof body !== 'object' || !('style' in body)) {
+    return 'monogram'
+  }
+
+  const style = (body as { style?: unknown }).style
+  return typeof style === 'string' && allowedStyles.has(style) ? style : 'monogram'
+}
+
+function parseVariant(body: unknown) {
+  if (!body || typeof body !== 'object' || !('variant' in body)) {
+    return 0
+  }
+
+  const variant = Number((body as { variant?: unknown }).variant)
+  return Number.isFinite(variant) ? Math.max(0, Math.min(999, Math.round(variant))) : 0
 }
 
 function extractSvg(text: string) {
@@ -55,6 +74,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   const apiKey = process.env.ANTHROPIC_API_KEY
   const prompt = parsePrompt(request.body)
+  const style = parseStyle(request.body)
+  const variant = parseVariant(request.body)
 
   if (!prompt) {
     response.status(400).json({ error: 'Prompt is required.' })
@@ -77,14 +98,14 @@ export default async function handler(request: VercelRequest, response: VercelRe
       model: process.env.ANTHROPIC_MODEL || fallbackModel,
       max_tokens: 1800,
       system:
-        'You design quiet premium modular brand marks. Return only one valid SVG, no Markdown, no explanation. Use simple geometric black/dark shapes on a white background. No external images, no scripts, no text nodes except a title.',
+        'You design quiet premium modular brand marks. Return only one valid SVG, no Markdown, no explanation. Use simple geometric black/dark shapes on a white background. No external images, no scripts, no text nodes except a title. Use only basic SVG geometry: rect, circle, ellipse, polygon, path, line, g, title.',
       messages: [
         {
           role: 'user',
           content: [
             {
               type: 'text',
-              text: `Create a bold source motif for this prompt: "${prompt}". The SVG must be 800 by 800, centered, high contrast, simple enough to become a pixel grid mark.`,
+              text: `Create a bold source motif for this prompt: "${prompt}". Style: ${style}. Variant seed: ${variant}. The SVG must be 800 by 800, centered, high contrast, simple enough to become a pixel grid mark.`,
             },
           ],
         },

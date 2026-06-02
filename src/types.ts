@@ -4,6 +4,8 @@ export type ToneMode = 'one' | 'two'
 
 export type PreviewBackground = 'dark' | 'light' | 'transparent'
 
+export type MotifStyle = 'monogram' | 'emblem' | 'orbital' | 'signal'
+
 export interface GeneratorSettings {
   gridSize: number
   elementSize: number

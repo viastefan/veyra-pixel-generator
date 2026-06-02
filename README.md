@@ -8,8 +8,11 @@ A minimal browser-based pixel branding generator for Festag / Veyra marks. The a
 - Drag and drop image loading
 - Paste image from the clipboard with the button or keyboard paste
 - Generate a source motif from a text prompt
+- Prompt styles: Monogram, Emblem, Orbital, and Signal
+- Variant generation for quick alternate motifs
 - Optional Claude-powered motif generation through a Vercel API function
 - Local prompt fallback when no Claude API key is configured
+- Source preview and source SVG download for generated motifs
 - Canvas-based grayscale sampling and pixel mark preview
 - Adjustable grid size, element size, small-square ratio, threshold, contrast, padding, and output size
 - Square, circle, and rounded-square elements
@@ -46,12 +49,14 @@ The production build is written to `dist/`.
 
 ## Export
 
-1. Type a prompt and generate a motif, or load/drop/paste an image.
-2. Adjust the grid and color controls.
-3. Use `Export PNG` for a high-resolution raster file.
-4. Use `Export SVG` to download `veyra-pixel-mark.svg`.
-5. Use `Export HTML` to download `veyra-pixel-mark.html`.
-6. Use `Copy SVG` when you want to paste the generated vector markup elsewhere.
+1. Type a prompt and choose a motif style, or load/drop/paste an image.
+2. Generate a pixel mark, then use `New variant` to explore alternate source motifs.
+3. Adjust the grid, shape, color, and preview controls.
+4. Use `Source SVG` to download the generated source motif.
+5. Use `Export PNG` for a high-resolution raster file.
+6. Use `Export SVG` to download `veyra-pixel-mark.svg`.
+7. Use `Export HTML` to download `veyra-pixel-mark.html`.
+8. Use `Copy SVG` when you want to paste the generated vector markup elsewhere.
 
 Image processing and export rendering run in the browser. Claude motif generation is optional and runs through the Vercel API function so the API key is not exposed to the browser.
 

@@ -274,6 +274,11 @@ button {
   gap: 10px;
 }
 
+.prompt-stack {
+  display: grid;
+  gap: 10px;
+}
+
 .prompt-input-row textarea {
   min-height: 74px;
   width: 100%;
@@ -293,6 +298,22 @@ button {
 .prompt-button {
   min-height: 74px;
   align-self: stretch;
+}
+
+.prompt-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.prompt-style-control {
+  flex: 1;
+  grid-auto-columns: 1fr;
+}
+
+.prompt-style-control button {
+  padding-inline: 8px;
 }
 
 .preview-frame {
@@ -460,6 +481,63 @@ button {
   text-transform: uppercase;
 }
 
+.source-card {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.source-thumb {
+  display: grid;
+  place-items: center;
+  width: 82px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(4, 7, 12, 0.5);
+}
+
+.source-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #f4f6f9;
+}
+
+.source-thumb span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.source-card strong,
+.source-card p {
+  margin: 0;
+}
+
+.source-card strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-card p {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .control {
   display: grid;
   gap: 9px;
@@ -609,6 +687,16 @@ code {
 
   .prompt-button {
     min-height: 42px;
+  }
+
+  .prompt-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .prompt-style-control,
+  .prompt-tools .button {
+    width: 100%;
   }
 
   .workspace {

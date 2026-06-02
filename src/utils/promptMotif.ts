@@ -1,4 +1,11 @@
+import type { MotifStyle } from '../types'
+
 const palette = ['#101821', '#1b2634', '#263140', '#6a738c']
+
+type LocalMotifOptions = {
+  style: MotifStyle
+  variant: number
+}
 
 const hashPrompt = (prompt: string) => {
   let hash = 2166136261
@@ -23,16 +30,24 @@ const nextRandom = (seed: number) => {
 
 const clampPrompt = (prompt: string) => prompt.trim().replace(/\s+/g, ' ').slice(0, 120)
 
-export function createLocalPromptSvg(prompt: string) {
+const styleBias: Record<MotifStyle, { radiusX: number; radiusY: number; diagonal: number; ring: number }> = {
+  monogram: { radiusX: 0.95, radiusY: 1.12, diagonal: 1.15, ring: 0.28 },
+  emblem: { radiusX: 1.12, radiusY: 1.12, diagonal: 0.72, ring: 0.5 },
+  orbital: { radiusX: 1.22, radiusY: 0.86, diagonal: 0.52, ring: 0.72 },
+  signal: { radiusX: 1.02, radiusY: 0.94, diagonal: 1.38, ring: 0.18 },
+}
+
+export function createLocalPromptSvg(prompt: string, options: LocalMotifOptions = { style: 'monogram', variant: 0 }) {
   const label = clampPrompt(prompt) || 'Veyra mark'
-  const seed = hashPrompt(label)
+  const seed = hashPrompt(`${label}:${options.style}:${options.variant}`)
   const random = nextRandom(seed)
   const cells = 18
   const cellSize = 40
   const center = (cells - 1) / 2
-  const radiusX = 4.8 + random() * 2.8
-  const radiusY = 4.8 + random() * 2.8
-  const twist = (random() - 0.5) * 0.7
+  const bias = styleBias[options.style]
+  const radiusX = (4.7 + random() * 2.4) * bias.radiusX
+  const radiusY = (4.7 + random() * 2.4) * bias.radiusY
+  const twist = (random() - 0.5) * (options.style === 'orbital' ? 1.2 : 0.7)
   const gap = 1.8 + random() * 3.5
   const blocks: string[] = []
 
@@ -42,10 +57,14 @@ export function createLocalPromptSvg(prompt: string) {
       const dx = mirroredColumn - center + Math.sin(row * 0.75 + seed) * twist
       const dy = row - center
       const distance = (dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY)
-      const line = Math.abs(dx * 0.7 + dy * 0.22) < 0.95 + random() * 0.18
+      const ringDistance = Math.abs(distance - 0.86)
+      const line = Math.abs(dx * 0.7 + dy * 0.22) < 0.95 * bias.diagonal + random() * 0.18
+      const counterLine = options.style !== 'monogram' && Math.abs(dx * -0.52 + dy * 0.38) < 0.62 + random() * 0.12
+      const ring = ringDistance < bias.ring * 0.22 && random() > 0.2
+      const signal = options.style === 'signal' && row % 3 === Math.floor(random() * 3) && Math.abs(dx) < 4.6
       const edgeNoise = random() > 0.62 && distance < 1.18
       const core = distance < 0.72 && random() > 0.08
-      const shouldDraw = core || line || edgeNoise
+      const shouldDraw = core || line || counterLine || ring || signal || edgeNoise
 
       if (!shouldDraw) {
         continue

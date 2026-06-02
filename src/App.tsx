@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ChangeEvent, DragEvent } from 'react'
-import type { GeneratorSettings, GeneratedGrid, PreviewBackground, ShapeMode } from './types'
+import type { GeneratorSettings, GeneratedGrid, MotifStyle, PreviewBackground, ShapeMode } from './types'
 import {
   DEFAULT_SETTINGS,
   computePixelGrid,
@@ -24,6 +24,13 @@ const SAMPLE_SOURCE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="720" h
   <path d="M360 240 444 305v110L360 480 276 415V305L360 240Z" fill="#101821"/>
   <rect x="334" y="92" width="52" height="536" fill="#101821"/>
 </svg>`
+
+const MOTIF_STYLES: Array<{ value: MotifStyle; label: string }> = [
+  { value: 'monogram', label: 'Monogram' },
+  { value: 'emblem', label: 'Emblem' },
+  { value: 'orbital', label: 'Orbital' },
+  { value: 'signal', label: 'Signal' },
+]
 
 const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
   {
@@ -134,6 +141,25 @@ function getImageFileFromList(files: FileList | File[]) {
   return Array.from(files).find(isSupportedImage) ?? null
 }
 
+function readBlobAsDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('The source preview could not be created.'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function downloadTextFile(content: string, fileName: string, type: string) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function SliderControl({
   label,
   min,
@@ -201,7 +227,12 @@ function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoadingImage, setIsLoadingImage] = useState(false)
   const [prompt, setPrompt] = useState('minimal Veyra monogram, modular premium festival mark')
+  const [motifStyle, setMotifStyle] = useState<MotifStyle>('monogram')
+  const [motifVariant, setMotifVariant] = useState(0)
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false)
+  const [sourcePreviewUrl, setSourcePreviewUrl] = useState('')
+  const [sourceSvg, setSourceSvg] = useState('')
+  const [sourceLabel, setSourceLabel] = useState('No source loaded')
   const [status, setStatus] = useState('Load, drop, or paste an image.')
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -216,7 +247,7 @@ function App() {
     }))
   }, [])
 
-  const loadImageFile = useCallback(async (file: File) => {
+  const loadImageFile = useCallback(async (file: File, options: { sourceSvg?: string; sourceLabel?: string } = {}) => {
     if (!isSupportedImage(file)) {
       setStatus('Use PNG, JPG, JPEG, WEBP, or SVG.')
       return
@@ -231,8 +262,12 @@ function App() {
       setIsLoadingImage(true)
       setStatus(`Loading ${file.name || 'image'}...`)
       const nextImage = await createImageFromBlob(file)
+      const previewUrl = await readBlobAsDataUrl(file)
       setImage(nextImage)
       setImageName(file.name || 'Clipboard image')
+      setSourcePreviewUrl(previewUrl)
+      setSourceSvg(options.sourceSvg ?? '')
+      setSourceLabel(options.sourceLabel ?? 'Imported source image')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Image could not be loaded.')
     } finally {
@@ -241,9 +276,9 @@ function App() {
   }, [])
 
   const loadSvgSource = useCallback(
-    async (svg: string, fileName: string) => {
+    async (svg: string, fileName: string, sourceLabel = 'Generated source SVG') => {
       const file = new File([svg], fileName, { type: 'image/svg+xml' })
-      await loadImageFile(file)
+      await loadImageFile(file, { sourceSvg: svg, sourceLabel })
     },
     [loadImageFile],
   )
@@ -324,10 +359,10 @@ function App() {
   }, [loadImageFile])
 
   const loadSampleSource = useCallback(async () => {
-    await loadSvgSource(SAMPLE_SOURCE_SVG, 'veyra-test-source.svg')
+    await loadSvgSource(SAMPLE_SOURCE_SVG, 'veyra-test-source.svg', 'Test source SVG')
   }, [loadSvgSource])
 
-  const generatePromptMotif = async () => {
+  const generatePromptMotif = async (variant = motifVariant) => {
     const cleanPrompt = prompt.trim()
 
     if (!cleanPrompt) {
@@ -342,7 +377,7 @@ function App() {
       const response = await fetch('/api/generate-pixel-motif', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: cleanPrompt }),
+        body: JSON.stringify({ prompt: cleanPrompt, style: motifStyle, variant }),
       })
 
       if (!response.ok) {
@@ -355,14 +390,20 @@ function App() {
         throw new Error('Claude returned no usable SVG. Using local motif generation.')
       }
 
-      await loadSvgSource(data.svg, 'claude-pixel-source.svg')
+      await loadSvgSource(data.svg, 'claude-pixel-source.svg', `Claude ${motifStyle} source`)
       setStatus(data.source === 'claude' ? 'Claude motif generated.' : 'Motif generated.')
     } catch {
-      await loadSvgSource(createLocalPromptSvg(cleanPrompt), 'local-prompt-source.svg')
+      await loadSvgSource(createLocalPromptSvg(cleanPrompt, { style: motifStyle, variant }), 'local-prompt-source.svg', `Local ${motifStyle} source`)
       setStatus('Local prompt motif generated. Add ANTHROPIC_API_KEY on Vercel to use Claude.')
     } finally {
       setIsGeneratingPrompt(false)
     }
+  }
+
+  const generateNextVariant = () => {
+    const nextVariant = motifVariant + 1
+    setMotifVariant(nextVariant)
+    void generatePromptMotif(nextVariant)
   }
 
   useEffect(() => {
@@ -495,6 +536,16 @@ function App() {
     }
   }
 
+  const handleDownloadSourceSvg = () => {
+    if (!sourceSvg) {
+      setStatus('Generate a prompt motif before downloading the source SVG.')
+      return
+    }
+
+    downloadTextFile(sourceSvg, 'veyra-source-motif.svg', 'image/svg+xml;charset=utf-8')
+    setStatus('Source SVG downloaded.')
+  }
+
   const applyPreset = (presetSettings: Partial<GeneratorSettings>) => {
     setSettings((current) => ({
       ...current,
@@ -584,16 +635,40 @@ function App() {
               <h2>AI motif</h2>
               <p>Describe a symbol. Claude can generate the source motif; local fallback works immediately.</p>
             </div>
-            <div className="prompt-input-row">
-              <textarea
-                value={prompt}
-                rows={2}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="e.g. abstract Veyra compass, premium modular flower, quiet festival monogram"
-              />
-              <button className="button button-primary prompt-button" type="button" onClick={generatePromptMotif} disabled={isGeneratingPrompt}>
-                {isGeneratingPrompt ? 'Generating...' : 'Generate pixel mark'}
-              </button>
+            <div className="prompt-stack">
+              <div className="prompt-input-row">
+                <textarea
+                  value={prompt}
+                  rows={2}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="e.g. abstract Veyra compass, premium modular flower, quiet festival monogram"
+                />
+                <button
+                  className="button button-primary prompt-button"
+                  type="button"
+                  onClick={() => void generatePromptMotif()}
+                  disabled={isGeneratingPrompt}
+                >
+                  {isGeneratingPrompt ? 'Generating...' : 'Generate pixel mark'}
+                </button>
+              </div>
+              <div className="prompt-tools">
+                <div className="segmented prompt-style-control" aria-label="Motif style">
+                  {MOTIF_STYLES.map((style) => (
+                    <button
+                      key={style.value}
+                      type="button"
+                      className={motifStyle === style.value ? 'is-active' : ''}
+                      onClick={() => setMotifStyle(style.value)}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
+                </div>
+                <button className="button" type="button" onClick={generateNextVariant} disabled={isGeneratingPrompt || !prompt.trim()}>
+                  New variant
+                </button>
+              </div>
             </div>
           </section>
 
@@ -638,6 +713,27 @@ function App() {
               Reset
             </button>
           </div>
+
+          <section className="control-section">
+            <h3>Source</h3>
+            <div className="source-card">
+              <div className="source-thumb">
+                {sourcePreviewUrl ? <img src={sourcePreviewUrl} alt="" /> : <span>No source</span>}
+              </div>
+              <div>
+                <strong>{sourceLabel}</strong>
+                <p>{imageName || 'Generate or load a source image.'}</p>
+              </div>
+            </div>
+            <div className="export-grid">
+              <button className="button" type="button" onClick={loadSampleSource}>
+                Test source
+              </button>
+              <button className="button" type="button" disabled={!sourceSvg} onClick={handleDownloadSourceSvg}>
+                Source SVG
+              </button>
+            </div>
+          </section>
 
           <section className="control-section">
             <h3>Presets</h3>
