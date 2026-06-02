@@ -922,6 +922,62 @@ code {
   white-space: nowrap;
 }
 
+.favorite-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.favorite-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(3, 5, 8, 0.36);
+}
+
+.favorite-preview {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.favorite-preview:hover {
+  color: var(--text);
+}
+
+.favorite-preview img {
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f4f6f9;
+  object-fit: contain;
+}
+
+.favorite-preview span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .export-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

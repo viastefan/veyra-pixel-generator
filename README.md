@@ -17,6 +17,7 @@ Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App
 - Werkzeuge für helle Pixel, Schattenpixel, Radierer und gerade Pixellinien
 - Klarer Zeichnen-an/aus-Schalter direkt über der Canvas
 - `Zurück`-Button für die wichtigsten Editor-Schritte
+- Favoriten mit lokaler Browser-Speicherung für starke Zwischenstände
 - Logo-Vorlagen, 1000-Mix-Randomizer und 4er Logo-Serien mit anklickbaren Varianten
 - Look-Presets, Reset und subtile Zufallsabstimmung
 - Smart-Motion-Live-Vorschau direkt in der App
@@ -54,10 +55,11 @@ Der Produktions-Build landet in `dist/`.
 2. Mit `Pixelmark erzeugen` ein KI-/Fallback-Motiv erstellen oder das Raster manuell bearbeiten.
 3. Im Bereich `Smart Motion` die Bewegung direkt ansehen oder mit `Replay` neu abspielen.
 4. Im Bereich `Pixel zeichnen` den Zeichenmodus aktivieren und mit ✏️, 🌫️, 🧽 oder 📏 arbeiten.
-5. Über `Logo-Vorlagen`, `1000 Mix` oder `4er Logo-Serie würfeln` neue Markenrichtungen erzeugen.
-6. Rastergröße, Elementgröße, Schwelle, Kontrast, Form und Farben fein einstellen.
-7. Mit `Pixelruhe` störende Einzelpixel reduzieren oder mehr feine Details zulassen.
-8. Mit `PNG`, `SVG`, `HTML` oder `Smart-Motion HTML` exportieren.
+5. Gute Varianten mit `Merken` als Favorit speichern und später wieder laden.
+6. Über `Logo-Vorlagen`, `1000 Mix` oder `4er Logo-Serie würfeln` neue Markenrichtungen erzeugen.
+7. Rastergröße, Elementgröße, Schwelle, Kontrast, Form und Farben fein einstellen.
+8. Mit `Pixelruhe` störende Einzelpixel reduzieren oder mehr feine Details zulassen.
+9. Mit `PNG`, `SVG`, `HTML` oder `Smart-Motion HTML` exportieren.
 
 ## Kommerzielle Nutzung
 

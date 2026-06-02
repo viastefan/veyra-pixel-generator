@@ -16,6 +16,8 @@ import { downloadAnimatedHtml, downloadHtml, getSmartMotionPlan } from './utils/
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
 const IMAGE_INPUT_ID = 'veyra-image-input'
 const ACCEPTED_IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|svg)$/i
+const FAVORITES_STORAGE_KEY = 'veyra-pixel-generator:favorites'
+const MAX_FAVORITES = 10
 type DrawTool = 'primary' | 'secondary' | 'erase' | 'line'
 type ManualPixelValue = 'primary' | 'secondary' | 'erase'
 type ManualPixelMap = Record<string, ManualPixelValue>
@@ -51,6 +53,25 @@ type EditorSnapshot = {
   blankMode: boolean
   drawMode: boolean
   showRaster: boolean
+}
+type SavedMark = {
+  id: string
+  name: string
+  savedAt: string
+  settings: GeneratorSettings
+  gridSnapshot?: GeneratedGrid
+  previewBackground: PreviewBackground
+  prompt: string
+  motifStyle: MotifStyle
+  motifVariant: number
+  sourcePreviewUrl: string
+  sourceSvg: string
+  sourceLabel: string
+  imageName: string
+  manualPixels: ManualPixelMap
+  blankMode: boolean
+  showRaster: boolean
+  thumbnailUrl: string
 }
 
 const SAMPLE_SOURCE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
@@ -282,6 +303,12 @@ function downloadTextFile(content: string, fileName: string, type: string) {
   URL.revokeObjectURL(url)
 }
 
+async function createImageFromDataUrl(dataUrl: string) {
+  const response = await fetch(dataUrl)
+  const blob = await response.blob()
+  return createImageFromBlob(blob)
+}
+
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 const cellKey = (cell: GridCell) => `${cell.row}-${cell.column}`
@@ -289,6 +316,32 @@ const cellKey = (cell: GridCell) => `${cell.row}-${cell.column}`
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
 const svgToDataUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+
+function readSavedMarks() {
+  try {
+    if (typeof window === 'undefined') {
+      return []
+    }
+
+    const rawValue = window.localStorage.getItem(FAVORITES_STORAGE_KEY)
+
+    if (!rawValue) {
+      return []
+    }
+
+    const parsed = JSON.parse(rawValue) as SavedMark[]
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed
+      .filter((mark) => typeof mark.id === 'string' && typeof mark.name === 'string' && typeof mark.thumbnailUrl === 'string')
+      .slice(0, MAX_FAVORITES)
+  } catch {
+    return []
+  }
+}
 
 function parseCellKey(key: string): GridCell | null {
   const [row, column] = key.split('-').map(Number)
@@ -372,6 +425,46 @@ function applyManualPixels(grid: GeneratedGrid, edits: ManualPixelMap, settings:
   return {
     ...grid,
     elements: editedElements,
+  }
+}
+
+function adaptGridToSettings(grid: GeneratedGrid, settings: GeneratorSettings): GeneratedGrid {
+  const outputSize = Math.round(clampNumber(settings.outputSize, 512, 2400))
+  const padding = Math.round(clampNumber(settings.padding, 0, outputSize * 0.42))
+  const innerSize = Math.max(outputSize - padding * 2, outputSize * 0.1)
+  const cellSize = innerSize / grid.gridSize
+  const threshold = clampNumber(settings.threshold / 100, 0.01, 0.99)
+  const elementRatio = clampNumber(settings.elementSize / 100, 0.08, 1)
+  const minRatio = clampNumber(settings.smallSquareRatio / 100, 0.05, 1)
+
+  return {
+    ...grid,
+    outputSize,
+    padding,
+    cellSize,
+    elements: grid.elements
+      .filter((element) => element.strength >= threshold)
+      .map((element) => {
+        const normalizedStrength = clampNumber((element.strength - threshold) / (1 - threshold), 0, 1)
+        const tone: GridElement['tone'] =
+          settings.tones === 'two' && normalizedStrength < 0.48 ? 'secondary' : 'primary'
+
+        return {
+          ...element,
+          x: padding + element.column * cellSize + cellSize / 2,
+          y: padding + element.row * cellSize + cellSize / 2,
+          size: cellSize * elementRatio * (minRatio + normalizedStrength * (1 - minRatio)),
+          tone,
+          color: tone === 'primary' ? settings.primaryColor : settings.secondaryColor,
+        }
+      }),
+  }
+}
+
+function cloneGrid(grid: GeneratedGrid): GeneratedGrid {
+  return {
+    ...grid,
+    elements: grid.elements.map((element) => ({ ...element })),
   }
 }
 
@@ -664,6 +757,7 @@ function App() {
   const [motionPlayKey, setMotionPlayKey] = useState(0)
   const [logoRecipeCursor, setLogoRecipeCursor] = useState(0)
   const [logoVariants, setLogoVariants] = useState<LogoVariant[]>([])
+  const [savedMarks, setSavedMarks] = useState<SavedMark[]>(() => readSavedMarks())
   const [undoDepth, setUndoDepth] = useState(0)
   const [status, setStatus] = useState('Bild laden, einfügen oder direkt zeichnen.')
 
@@ -976,8 +1070,15 @@ function App() {
   }, [loadImageFile])
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(savedMarks.slice(0, MAX_FAVORITES)))
+    } catch {
+      setStatus('Favoriten-Speicher ist voll. Lösche alte Favoriten.')
+    }
+  }, [savedMarks])
+
+  useEffect(() => {
     if (!image || !processingCanvasRef.current) {
-      setGrid(null)
       return
     }
 
@@ -1014,7 +1115,7 @@ function App() {
       return null
     }
 
-    return applyManualPixels(baseGrid, manualPixels, settings)
+    return applyManualPixels(adaptGridToSettings(baseGrid, settings), manualPixels, settings)
   }, [baseGrid, manualPixels, settings])
 
   const workingGrid = activeGrid ?? blankGrid
@@ -1193,6 +1294,102 @@ function App() {
 
   const hasArtwork = Boolean(activeGrid?.elements.length)
   const canUndo = undoDepth > 0
+
+  const saveCurrentMark = () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    const savedAt = new Date().toISOString()
+    const dateLabel = new Intl.DateTimeFormat('de-DE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+    }).format(new Date(savedAt))
+    const baseName = sourceLabel && sourceLabel !== 'Keine Quelle geladen' ? sourceLabel : 'Veyra Mark'
+    const storedSourcePreviewUrl = sourceSvg ? svgToDataUrl(sourceSvg) : ''
+    const nextMark: SavedMark = {
+      id: `${Date.now()}-${Math.round(Math.random() * 10000)}`,
+      name: `${baseName} ${dateLabel}`,
+      savedAt,
+      settings: { ...settings },
+      gridSnapshot: cloneGrid(activeGrid),
+      previewBackground,
+      prompt,
+      motifStyle,
+      motifVariant,
+      sourcePreviewUrl: storedSourcePreviewUrl,
+      sourceSvg,
+      sourceLabel,
+      imageName,
+      manualPixels: { ...manualPixels },
+      blankMode,
+      showRaster,
+      thumbnailUrl: svgToDataUrl(generateSvg(activeGrid, settings)),
+    }
+
+    setSavedMarks((current) => [nextMark, ...current].slice(0, MAX_FAVORITES))
+    setStatus('Favorit gespeichert.')
+  }
+
+  const restoreSavedMark = async (mark: SavedMark) => {
+    pushUndoSnapshot('Favorit geladen')
+    const restoredGrid = mark.gridSnapshot ? adaptGridToSettings(cloneGrid(mark.gridSnapshot), mark.settings) : null
+    const restoredSourcePreview = mark.sourcePreviewUrl || (mark.sourceSvg ? svgToDataUrl(mark.sourceSvg) : '')
+    const restoredManualPixels = mark.manualPixels ?? {}
+
+    setSettings(mark.settings)
+    setPreviewBackground(mark.previewBackground)
+    setPrompt(mark.prompt)
+    setMotifStyle(mark.motifStyle)
+    motifStyleRef.current = mark.motifStyle
+    setMotifVariant(mark.motifVariant)
+    setSourcePreviewUrl(restoredSourcePreview)
+    setSourceSvg(mark.sourceSvg)
+    setSourceLabel(mark.sourceLabel)
+    setImageName(mark.imageName)
+    setManualPixels(restoredManualPixels)
+    setBlankMode(mark.blankMode || (!restoredSourcePreview && Object.keys(restoredManualPixels).length > 0 && !restoredGrid))
+    setDrawMode(false)
+    setShowRaster(mark.showRaster)
+    setLineStart(null)
+    setIsDrawing(false)
+
+    if (restoredGrid) {
+      setImage(null)
+      setGrid(restoredGrid)
+      setMotionPlayKey((current) => current + 1)
+      setStatus(`${mark.name} geladen.`)
+      return
+    }
+
+    if (!restoredSourcePreview) {
+      setImage(null)
+      setGrid(null)
+      setMotionPlayKey((current) => current + 1)
+      setStatus(`${mark.name} geladen.`)
+      return
+    }
+
+    try {
+      const nextImage = await createImageFromDataUrl(restoredSourcePreview)
+      setImage(nextImage)
+      setGrid(null)
+      setMotionPlayKey((current) => current + 1)
+      setStatus(`${mark.name} geladen.`)
+    } catch {
+      setImage(null)
+      setGrid(null)
+      setStatus('Favorit geladen, aber die Bildquelle konnte nicht wiederhergestellt werden.')
+    }
+  }
+
+  const deleteSavedMark = (markId: string) => {
+    setSavedMarks((current) => current.filter((mark) => mark.id !== markId))
+    setStatus('Favorit gelöscht.')
+  }
 
   useEffect(() => {
     if (hasArtwork) {
@@ -1472,6 +1669,9 @@ function App() {
           <button className="button button-undo" type="button" disabled={!canUndo} onClick={handleUndo}>
             Zurück
           </button>
+          <button className="button" type="button" disabled={!hasArtwork} onClick={saveCurrentMark}>
+            Merken
+          </button>
           <label className="button button-primary upload-label" htmlFor={IMAGE_INPUT_ID}>
             Bild laden
           </label>
@@ -1660,6 +1860,37 @@ function App() {
             <button className="button button-motion full-width" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
               Smart-Motion HTML exportieren
             </button>
+          </section>
+
+          <section className="control-section">
+            <div className="section-heading-row">
+              <h3>Favoriten</h3>
+              <button className="button button-compact" type="button" disabled={!hasArtwork} onClick={saveCurrentMark}>
+                Merken
+              </button>
+            </div>
+            {savedMarks.length > 0 ? (
+              <div className="favorite-grid" aria-label="Gespeicherte Favoriten">
+                {savedMarks.map((mark) => (
+                  <article className="favorite-card" key={mark.id}>
+                    <button className="favorite-preview" type="button" onClick={() => void restoreSavedMark(mark)}>
+                      <img src={mark.thumbnailUrl} alt="" />
+                      <span>{mark.name}</span>
+                    </button>
+                    <div className="favorite-actions">
+                      <button className="button button-compact" type="button" onClick={() => void restoreSavedMark(mark)}>
+                        Laden
+                      </button>
+                      <button className="button button-compact" type="button" onClick={() => deleteSavedMark(mark.id)}>
+                        Löschen
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="draw-hint">Speichere starke Varianten mit Merken. Sie bleiben in diesem Browser erhalten.</p>
+            )}
           </section>
 
           <section className="control-section">
