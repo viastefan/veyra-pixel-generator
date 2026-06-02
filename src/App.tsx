@@ -239,6 +239,7 @@ function App() {
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const processingCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const dragDepthRef = useRef(0)
+  const motifStyleRef = useRef<MotifStyle>('monogram')
 
   const updateSetting = useCallback(<Key extends keyof GeneratorSettings>(key: Key, value: GeneratorSettings[Key]) => {
     setSettings((current) => ({
@@ -362,8 +363,14 @@ function App() {
     await loadSvgSource(SAMPLE_SOURCE_SVG, 'veyra-test-source.svg', 'Test source SVG')
   }, [loadSvgSource])
 
+  const updateMotifStyle = (style: MotifStyle) => {
+    motifStyleRef.current = style
+    setMotifStyle(style)
+  }
+
   const generatePromptMotif = async (variant = motifVariant) => {
     const cleanPrompt = prompt.trim()
+    const activeStyle = motifStyleRef.current
 
     if (!cleanPrompt) {
       setStatus('Enter a prompt first.')
@@ -377,7 +384,7 @@ function App() {
       const response = await fetch('/api/generate-pixel-motif', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: cleanPrompt, style: motifStyle, variant }),
+        body: JSON.stringify({ prompt: cleanPrompt, style: activeStyle, variant }),
       })
 
       if (!response.ok) {
@@ -390,10 +397,10 @@ function App() {
         throw new Error('Claude returned no usable SVG. Using local motif generation.')
       }
 
-      await loadSvgSource(data.svg, 'claude-pixel-source.svg', `Claude ${motifStyle} source`)
+      await loadSvgSource(data.svg, 'claude-pixel-source.svg', `Claude ${activeStyle} source`)
       setStatus(data.source === 'claude' ? 'Claude motif generated.' : 'Motif generated.')
     } catch {
-      await loadSvgSource(createLocalPromptSvg(cleanPrompt, { style: motifStyle, variant }), 'local-prompt-source.svg', `Local ${motifStyle} source`)
+      await loadSvgSource(createLocalPromptSvg(cleanPrompt, { style: activeStyle, variant }), 'local-prompt-source.svg', `Local ${activeStyle} source`)
       setStatus('Local prompt motif generated. Add ANTHROPIC_API_KEY on Vercel to use Claude.')
     } finally {
       setIsGeneratingPrompt(false)
@@ -659,7 +666,7 @@ function App() {
                       key={style.value}
                       type="button"
                       className={motifStyle === style.value ? 'is-active' : ''}
-                      onClick={() => setMotifStyle(style.value)}
+                      onClick={() => updateMotifStyle(style.value)}
                     >
                       {style.label}
                     </button>
