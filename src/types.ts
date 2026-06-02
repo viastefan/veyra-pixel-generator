@@ -12,6 +12,7 @@ export interface GeneratorSettings {
   smallSquareRatio: number
   threshold: number
   contrast: number
+  pixelSmoothing: number
   invert: boolean
   tones: ToneMode
   shape: ShapeMode

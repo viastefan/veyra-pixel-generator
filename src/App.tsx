@@ -11,7 +11,7 @@ import {
 import { downloadPng } from './utils/pngExport'
 import { createLocalPromptSvg } from './utils/promptMotif'
 import { downloadSvg, generateSvg } from './utils/svgExport'
-import { downloadAnimatedHtml, downloadHtml } from './utils/htmlExport'
+import { downloadAnimatedHtml, downloadHtml, getSmartMotionPlan } from './utils/htmlExport'
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
 const IMAGE_INPUT_ID = 'veyra-image-input'
@@ -20,6 +20,38 @@ type DrawTool = 'primary' | 'secondary' | 'erase' | 'line'
 type ManualPixelValue = 'primary' | 'secondary' | 'erase'
 type ManualPixelMap = Record<string, ManualPixelValue>
 type GridCell = { row: number; column: number }
+type LogoRecipe = {
+  name: string
+  prompt: string
+  style: MotifStyle
+  settings: Partial<GeneratorSettings>
+}
+type LogoVariant = LogoRecipe & {
+  id: string
+  svg: string
+  previewUrl: string
+  variant: number
+}
+type EditorSnapshot = {
+  label: string
+  settings: GeneratorSettings
+  image: HTMLImageElement | null
+  imageName: string
+  grid: GeneratedGrid | null
+  previewBackground: PreviewBackground
+  prompt: string
+  motifStyle: MotifStyle
+  motifVariant: number
+  sourcePreviewUrl: string
+  sourceSvg: string
+  sourceLabel: string
+  manualPixels: ManualPixelMap
+  drawTool: DrawTool
+  brushSize: number
+  blankMode: boolean
+  drawMode: boolean
+  showRaster: boolean
+}
 
 const SAMPLE_SOURCE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
   <rect width="720" height="720" fill="#f6f8fb"/>
@@ -52,6 +84,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
       smallSquareRatio: 36,
       threshold: 38,
       contrast: 126,
+      pixelSmoothing: 54,
       tones: 'two',
       shape: 'rounded-square',
       bgColor: '#070B12',
@@ -69,6 +102,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
       smallSquareRatio: 22,
       threshold: 34,
       contrast: 150,
+      pixelSmoothing: 42,
       tones: 'two',
       shape: 'square',
       bgColor: '#070B12',
@@ -86,6 +120,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
       smallSquareRatio: 44,
       threshold: 42,
       contrast: 112,
+      pixelSmoothing: 64,
       tones: 'two',
       shape: 'circle',
       bgColor: '#070B12',
@@ -103,6 +138,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
       smallSquareRatio: 18,
       threshold: 46,
       contrast: 168,
+      pixelSmoothing: 34,
       tones: 'one',
       shape: 'square',
       bgColor: '#070B12',
@@ -111,6 +147,81 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
       accentColor: '#6a738c',
       transparentBg: false,
     },
+  },
+]
+
+const LOGO_RECIPES: LogoRecipe[] = [
+  {
+    name: 'Veyra Sigil',
+    prompt: 'premium Veyra sigil, mirrored modular diamond, calm festival tech logo',
+    style: 'emblem',
+    settings: { gridSize: 44, elementSize: 86, smallSquareRatio: 28, threshold: 36, contrast: 142, pixelSmoothing: 52, shape: 'rounded-square', tones: 'two' },
+  },
+  {
+    name: 'Orbit Seal',
+    prompt: 'orbital ring seal, central monogram, precise modular constellation mark',
+    style: 'orbital',
+    settings: { gridSize: 50, elementSize: 78, smallSquareRatio: 38, threshold: 40, contrast: 132, pixelSmoothing: 58, shape: 'circle', tones: 'two' },
+  },
+  {
+    name: 'Sharp Crest',
+    prompt: 'sharp abstract crest, premium angular V mark, high-end black label emblem',
+    style: 'emblem',
+    settings: { gridSize: 56, elementSize: 92, smallSquareRatio: 18, threshold: 44, contrast: 176, pixelSmoothing: 32, shape: 'square', tones: 'one' },
+  },
+  {
+    name: 'Signal Bloom',
+    prompt: 'modular signal flower, geometric bloom, quiet luxury festival symbol',
+    style: 'signal',
+    settings: { gridSize: 48, elementSize: 82, smallSquareRatio: 42, threshold: 37, contrast: 124, pixelSmoothing: 62, shape: 'rounded-square', tones: 'two' },
+  },
+  {
+    name: 'Compass Core',
+    prompt: 'abstract compass core, north star grid, refined Veyra navigation mark',
+    style: 'monogram',
+    settings: { gridSize: 42, elementSize: 88, smallSquareRatio: 24, threshold: 35, contrast: 152, pixelSmoothing: 48, shape: 'rounded-square', tones: 'two' },
+  },
+  {
+    name: 'Monolith',
+    prompt: 'minimal monolith logo, vertical modular totem, elegant pixel brand mark',
+    style: 'monogram',
+    settings: { gridSize: 38, elementSize: 94, smallSquareRatio: 20, threshold: 42, contrast: 164, pixelSmoothing: 38, shape: 'square', tones: 'two' },
+  },
+  {
+    name: 'Lunar Grid',
+    prompt: 'lunar grid emblem, circular moon architecture, soft premium pixel symbol',
+    style: 'orbital',
+    settings: { gridSize: 52, elementSize: 72, smallSquareRatio: 48, threshold: 39, contrast: 116, pixelSmoothing: 66, shape: 'circle', tones: 'two' },
+  },
+  {
+    name: 'Gate Mark',
+    prompt: 'festival gate icon, modular arch, symmetrical high-end venue logo',
+    style: 'emblem',
+    settings: { gridSize: 46, elementSize: 86, smallSquareRatio: 30, threshold: 38, contrast: 148, pixelSmoothing: 50, shape: 'rounded-square', tones: 'two' },
+  },
+  {
+    name: 'Pulse Stack',
+    prompt: 'stacked pulse waveform, vertical rhythm logo, refined modular signal',
+    style: 'signal',
+    settings: { gridSize: 58, elementSize: 76, smallSquareRatio: 26, threshold: 34, contrast: 156, pixelSmoothing: 44, shape: 'square', tones: 'two' },
+  },
+  {
+    name: 'Prism Node',
+    prompt: 'prismatic node system, diamond network, premium modular identity mark',
+    style: 'emblem',
+    settings: { gridSize: 54, elementSize: 80, smallSquareRatio: 34, threshold: 41, contrast: 138, pixelSmoothing: 56, shape: 'rounded-square', tones: 'two' },
+  },
+  {
+    name: 'Soft Crown',
+    prompt: 'soft abstract crown, elegant festival royalty symbol, modular pixel crest',
+    style: 'monogram',
+    settings: { gridSize: 40, elementSize: 82, smallSquareRatio: 45, threshold: 36, contrast: 118, pixelSmoothing: 68, shape: 'circle', tones: 'two' },
+  },
+  {
+    name: 'Arc System',
+    prompt: 'architectural arc system, precise circular modules, luxury tech emblem',
+    style: 'orbital',
+    settings: { gridSize: 60, elementSize: 74, smallSquareRatio: 32, threshold: 43, contrast: 146, pixelSmoothing: 46, shape: 'rounded-square', tones: 'two' },
   },
 ]
 
@@ -174,6 +285,10 @@ function downloadTextFile(content: string, fileName: string, type: string) {
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 const cellKey = (cell: GridCell) => `${cell.row}-${cell.column}`
+
+const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+
+const svgToDataUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 
 function parseCellKey(key: string): GridCell | null {
   const [row, column] = key.split('-').map(Number)
@@ -446,6 +561,82 @@ function ColorControl({
   )
 }
 
+function MotionPreview({
+  grid,
+  settings,
+  playKey,
+}: {
+  grid: GeneratedGrid | null
+  settings: GeneratorSettings
+  playKey: number
+}) {
+  const motionElements = useMemo(() => (grid ? getSmartMotionPlan(grid) : []), [grid])
+
+  if (!grid || !motionElements.length) {
+    return (
+      <div className="motion-empty">
+        <span>Erzeuge oder zeichne ein Motiv.</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="motion-stage" key={playKey}>
+      <svg
+        className="motion-svg is-reducing"
+        xmlns="http://www.w3.org/2000/svg"
+        width={grid.outputSize}
+        height={grid.outputSize}
+        viewBox={`0 0 ${grid.outputSize} ${grid.outputSize}`}
+        aria-label="Smart-Motion Vorschau"
+      >
+        {!settings.transparentBg && <rect width={grid.outputSize} height={grid.outputSize} fill={settings.bgColor} />}
+        {motionElements.map(({ element, keep, order, offsetX, offsetY }) => {
+          const half = element.size / 2
+          const style = {
+            '--delay': `${order}ms`,
+            '--x': `${offsetX}px`,
+            '--y': `${offsetY}px`,
+            transformOrigin: `${element.x}px ${element.y}px`,
+          } as CSSProperties
+          const className = keep ? 'motion-pixel keep' : 'motion-pixel'
+
+          if (settings.shape === 'circle') {
+            return (
+              <circle
+                className={className}
+                style={style}
+                key={element.id}
+                cx={element.x}
+                cy={element.y}
+                r={half}
+                fill={element.color}
+              />
+            )
+          }
+
+          const radius = settings.shape === 'rounded-square' ? element.size * 0.22 : 0
+
+          return (
+            <rect
+              className={className}
+              style={style}
+              key={element.id}
+              x={element.x - half}
+              y={element.y - half}
+              width={element.size}
+              height={element.size}
+              rx={radius}
+              ry={radius}
+              fill={element.color}
+            />
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
 function App() {
   const [settings, setSettings] = useState<GeneratorSettings>(DEFAULT_SETTINGS)
   const [image, setImage] = useState<HTMLImageElement | null>(null)
@@ -470,6 +661,10 @@ function App() {
   const [blankMode, setBlankMode] = useState(false)
   const [drawMode, setDrawMode] = useState(false)
   const [showRaster, setShowRaster] = useState(true)
+  const [motionPlayKey, setMotionPlayKey] = useState(0)
+  const [logoRecipeCursor, setLogoRecipeCursor] = useState(0)
+  const [logoVariants, setLogoVariants] = useState<LogoVariant[]>([])
+  const [undoDepth, setUndoDepth] = useState(0)
   const [status, setStatus] = useState('Bild laden, einfügen oder direkt zeichnen.')
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -479,15 +674,106 @@ function App() {
   const motifStyleRef = useRef<MotifStyle>('monogram')
   const lastPaintedKeyRef = useRef('')
   const lastPaintedCellRef = useRef<GridCell | null>(null)
+  const historyRef = useRef<EditorSnapshot[]>([])
+
+  const createSnapshot = useCallback(
+    (label: string): EditorSnapshot => ({
+      label,
+      settings: { ...settings },
+      image,
+      imageName,
+      grid,
+      previewBackground,
+      prompt,
+      motifStyle,
+      motifVariant,
+      sourcePreviewUrl,
+      sourceSvg,
+      sourceLabel,
+      manualPixels: { ...manualPixels },
+      drawTool,
+      brushSize,
+      blankMode,
+      drawMode,
+      showRaster,
+    }),
+    [
+      blankMode,
+      brushSize,
+      drawMode,
+      drawTool,
+      grid,
+      image,
+      imageName,
+      manualPixels,
+      motifStyle,
+      motifVariant,
+      previewBackground,
+      prompt,
+      settings,
+      showRaster,
+      sourceLabel,
+      sourcePreviewUrl,
+      sourceSvg,
+    ],
+  )
+
+  const pushUndoSnapshot = useCallback(
+    (label: string) => {
+      historyRef.current = [...historyRef.current, createSnapshot(label)].slice(-80)
+      setUndoDepth(historyRef.current.length)
+    },
+    [createSnapshot],
+  )
+
+  const handleUndo = useCallback(() => {
+    const snapshot = historyRef.current.at(-1)
+
+    if (!snapshot) {
+      setStatus('Kein Schritt zum Zurückgehen.')
+      return
+    }
+
+    historyRef.current = historyRef.current.slice(0, -1)
+    setUndoDepth(historyRef.current.length)
+    setSettings(snapshot.settings)
+    setImage(snapshot.image)
+    setImageName(snapshot.imageName)
+    setGrid(snapshot.grid)
+    setPreviewBackground(snapshot.previewBackground)
+    setPrompt(snapshot.prompt)
+    setMotifStyle(snapshot.motifStyle)
+    motifStyleRef.current = snapshot.motifStyle
+    setMotifVariant(snapshot.motifVariant)
+    setSourcePreviewUrl(snapshot.sourcePreviewUrl)
+    setSourceSvg(snapshot.sourceSvg)
+    setSourceLabel(snapshot.sourceLabel)
+    setManualPixels(snapshot.manualPixels)
+    setDrawTool(snapshot.drawTool)
+    setBrushSize(snapshot.brushSize)
+    setBlankMode(snapshot.blankMode)
+    setDrawMode(snapshot.drawMode)
+    setShowRaster(snapshot.showRaster)
+    setLineStart(null)
+    setIsDrawing(false)
+    lastPaintedKeyRef.current = ''
+    lastPaintedCellRef.current = null
+    setMotionPlayKey((current) => current + 1)
+    setStatus(`Zurück: ${snapshot.label}`)
+  }, [])
 
   const updateSetting = useCallback(<Key extends keyof GeneratorSettings>(key: Key, value: GeneratorSettings[Key]) => {
+    if (settings[key] !== value) {
+      pushUndoSnapshot('Einstellung geändert')
+    }
+
     setSettings((current) => ({
       ...current,
       [key]: value,
     }))
-  }, [])
+  }, [pushUndoSnapshot, settings])
 
-  const loadImageFile = useCallback(async (file: File, options: { sourceSvg?: string; sourceLabel?: string } = {}) => {
+  const loadImageFile = useCallback(async (file: File, options: { sourceSvg?: string; sourceLabel?: string; skipUndo?: boolean } = {}) => {
     if (!isSupportedImage(file)) {
       setStatus('Nutze PNG, JPG, JPEG, WEBP oder SVG.')
       return
@@ -499,6 +785,10 @@ function App() {
     }
 
     try {
+      if (!options.skipUndo) {
+        pushUndoSnapshot('Quelle geladen')
+      }
+
       setIsLoadingImage(true)
       setStatus(`${file.name || 'Bild'} wird geladen...`)
       const nextImage = await createImageFromBlob(file)
@@ -516,12 +806,12 @@ function App() {
     } finally {
       setIsLoadingImage(false)
     }
-  }, [])
+  }, [pushUndoSnapshot])
 
   const loadSvgSource = useCallback(
-    async (svg: string, fileName: string, sourceLabel = 'Erzeugte Quell-SVG') => {
+    async (svg: string, fileName: string, sourceLabel = 'Erzeugte Quell-SVG', options: { skipUndo?: boolean } = {}) => {
       const file = new File([svg], fileName, { type: 'image/svg+xml' })
-      await loadImageFile(file, { sourceSvg: svg, sourceLabel })
+      await loadImageFile(file, { sourceSvg: svg, sourceLabel, skipUndo: options.skipUndo })
     },
     [loadImageFile],
   )
@@ -795,6 +1085,7 @@ function App() {
     }
 
     event.preventDefault()
+    pushUndoSnapshot(drawTool === 'line' ? 'Pixellinie' : 'Pixelzeichnung')
     event.currentTarget.setPointerCapture(event.pointerId)
     setHoverCell(cell)
 
@@ -844,7 +1135,10 @@ function App() {
     }
 
     if (drawTool === 'line' && lineStart && cell) {
-      paintCells(getLineCells(lineStart, cell), 'primary')
+      paintCells(
+        getLineCells(lineStart, cell).flatMap((lineCell) => getBrushCells(lineCell, workingGrid.gridSize, brushSize)),
+        'primary',
+      )
       setStatus('Pixellinie gesetzt.')
     }
 
@@ -898,6 +1192,13 @@ function App() {
   }, [activeGrid])
 
   const hasArtwork = Boolean(activeGrid?.elements.length)
+  const canUndo = undoDepth > 0
+
+  useEffect(() => {
+    if (hasArtwork) {
+      setMotionPlayKey((current) => current + 1)
+    }
+  }, [hasArtwork, activeGrid?.elements.length])
 
   const handleExportPng = async () => {
     if (!activeGrid || !activeGrid.elements.length) {
@@ -943,6 +1244,16 @@ function App() {
     setStatus('Animations-HTML heruntergeladen.')
   }
 
+  const replayMotionPreview = () => {
+    if (!hasArtwork) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    setMotionPlayKey((current) => current + 1)
+    setStatus('Smart Motion wird in der App abgespielt.')
+  }
+
   const handleCopySvg = async () => {
     if (!activeGrid || !activeGrid.elements.length) {
       setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
@@ -968,6 +1279,7 @@ function App() {
   }
 
   const handleBlankCanvas = () => {
+    pushUndoSnapshot('Leeres Raster')
     setImage(null)
     setGrid(null)
     setBlankMode(true)
@@ -981,12 +1293,14 @@ function App() {
   }
 
   const handleClearManualPixels = () => {
+    pushUndoSnapshot('Pixel gelöscht')
     setManualPixels({})
     setLineStart(null)
     setStatus('Manuelle Pixel gelöscht.')
   }
 
   const toggleDrawMode = (enabled: boolean) => {
+    pushUndoSnapshot(enabled ? 'Zeichnen aktiviert' : 'Zeichnen deaktiviert')
     setDrawMode(enabled)
     setShowRaster((current) => current || enabled)
     setStatus(
@@ -996,15 +1310,125 @@ function App() {
     )
   }
 
+  const updatePreviewBackground = (background: PreviewBackground) => {
+    if (previewBackground !== background) {
+      pushUndoSnapshot('Vorschau-Hintergrund')
+      setPreviewBackground(background)
+    }
+  }
+
   const applyPreset = (presetSettings: Partial<GeneratorSettings>) => {
+    pushUndoSnapshot('Look-Preset')
     setSettings((current) => ({
       ...current,
       ...presetSettings,
     }))
   }
 
+  const buildLogoSettings = (recipe: LogoRecipe, randomize = false): Partial<GeneratorSettings> => {
+    const randomBoost = randomize ? Math.random() : 0
+
+    return {
+      ...recipe.settings,
+      gridSize: Math.round(
+        clampNumber((recipe.settings.gridSize ?? settings.gridSize) + (randomize ? (randomBoost - 0.5) * 16 : 0), 24, 72),
+      ),
+      elementSize: Math.round(
+        clampNumber((recipe.settings.elementSize ?? settings.elementSize) + (randomize ? (Math.random() - 0.5) * 18 : 0), 56, 98),
+      ),
+      smallSquareRatio: Math.round(
+        clampNumber((recipe.settings.smallSquareRatio ?? settings.smallSquareRatio) + (randomize ? (Math.random() - 0.5) * 26 : 0), 12, 62),
+      ),
+      threshold: Math.round(
+        clampNumber((recipe.settings.threshold ?? settings.threshold) + (randomize ? (Math.random() - 0.5) * 14 : 0), 24, 58),
+      ),
+      contrast: Math.round(
+        clampNumber((recipe.settings.contrast ?? settings.contrast) + (randomize ? (Math.random() - 0.5) * 48 : 0), 96, 196),
+      ),
+      pixelSmoothing: Math.round(
+        clampNumber((recipe.settings.pixelSmoothing ?? settings.pixelSmoothing) + (randomize ? (Math.random() - 0.5) * 32 : 0), 24, 78),
+      ),
+    }
+  }
+
+  const createLogoVariant = (recipe: LogoRecipe, variant: number, randomize = true): LogoVariant => {
+    const svg = createLocalPromptSvg(recipe.prompt, { style: recipe.style, variant })
+
+    return {
+      ...recipe,
+      id: `${slugify(recipe.name)}-${variant}`,
+      settings: buildLogoSettings(recipe, randomize),
+      svg,
+      previewUrl: svgToDataUrl(svg),
+      variant,
+    }
+  }
+
+  const applyLogoVariant = async (logoVariant: LogoVariant) => {
+    pushUndoSnapshot('Logo-Variante')
+    setSettings((current) => ({
+      ...current,
+      ...logoVariant.settings,
+    }))
+    setPrompt(logoVariant.prompt)
+    setMotifVariant(logoVariant.variant)
+    updateMotifStyle(logoVariant.style)
+    setStatus(`${logoVariant.name} wird geladen...`)
+    await loadSvgSource(logoVariant.svg, `${slugify(logoVariant.name)}-source.svg`, `${logoVariant.name} Vorlage`, { skipUndo: true })
+    setMotionPlayKey((current) => current + 1)
+    setStatus(`${logoVariant.name} aktiv. Smart Motion ansehen oder weiter bearbeiten.`)
+  }
+
+  const applyLogoRecipe = async (
+    recipe: LogoRecipe,
+    options: { randomize?: boolean; variant?: number } = {},
+  ) => {
+    pushUndoSnapshot('Logo-Vorlage')
+    const nextVariant = options.variant ?? motifVariant + 1
+    const logoVariant = createLogoVariant(recipe, nextVariant, options.randomize)
+
+    setSettings((current) => ({
+      ...current,
+      ...logoVariant.settings,
+    }))
+    setPrompt(recipe.prompt)
+    setMotifVariant(nextVariant)
+    updateMotifStyle(recipe.style)
+    setStatus(`${recipe.name} wird als Logo-Vorlage erzeugt...`)
+
+    await loadSvgSource(
+      logoVariant.svg,
+      `${slugify(recipe.name)}-source.svg`,
+      `${recipe.name} Vorlage`,
+      { skipUndo: true },
+    )
+    setLogoVariants((current) => [logoVariant, ...current.filter((variant) => variant.id !== logoVariant.id)].slice(0, 8))
+    setMotionPlayKey((current) => current + 1)
+    setStatus(`${recipe.name} erzeugt. Feinjustieren, zeichnen oder Smart Motion ansehen.`)
+  }
+
+  const generateRandomLogoRecipe = () => {
+    const nextCursor = logoRecipeCursor + 1
+    const recipe = LOGO_RECIPES[Math.floor(Math.random() * LOGO_RECIPES.length)]
+    setLogoRecipeCursor(nextCursor)
+    void applyLogoRecipe(recipe, { randomize: true, variant: nextCursor + Math.floor(Math.random() * 1000) })
+  }
+
+  const generateLogoSeries = () => {
+    const nextCursor = logoRecipeCursor + 10
+    const variants = Array.from({ length: 4 }, (_, index) => {
+      const recipe = LOGO_RECIPES[Math.floor(Math.random() * LOGO_RECIPES.length)]
+      return createLogoVariant(recipe, nextCursor + index + Math.floor(Math.random() * 900))
+    })
+
+    setLogoRecipeCursor(nextCursor)
+    setLogoVariants(variants)
+    setStatus('Vier Logo-Varianten erzeugt. Wähle eine Karte aus.')
+  }
+
   const randomizeSettings = () => {
     const shapes: ShapeMode[] = ['square', 'circle', 'rounded-square']
+    pushUndoSnapshot('Fein zufällig')
     setSettings((current) => ({
       ...current,
       gridSize: Math.round(30 + Math.random() * 30),
@@ -1012,6 +1436,7 @@ function App() {
       smallSquareRatio: Math.round(18 + Math.random() * 34),
       threshold: Math.round(32 + Math.random() * 20),
       contrast: Math.round(108 + Math.random() * 58),
+      pixelSmoothing: Math.round(32 + Math.random() * 36),
       shape: shapes[Math.floor(Math.random() * shapes.length)],
     }))
   }
@@ -1044,6 +1469,9 @@ function App() {
         </div>
 
         <div className="toolbar" aria-label="Generator-Aktionen">
+          <button className="button button-undo" type="button" disabled={!canUndo} onClick={handleUndo}>
+            Zurück
+          </button>
           <label className="button button-primary upload-label" htmlFor={IMAGE_INPUT_ID}>
             Bild laden
           </label>
@@ -1051,7 +1479,7 @@ function App() {
             Einfügen
           </button>
           <button className={`button ${drawMode ? 'is-active-button' : ''}`} type="button" onClick={() => toggleDrawMode(!drawMode)}>
-            Pixel zeichnen
+            {drawMode ? 'Zeichnen: An' : 'Zeichnen: Aus'}
           </button>
           <div className="segmented" aria-label="Tonmodus">
             <button
@@ -1075,8 +1503,8 @@ function App() {
           <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportSvg}>
             SVG Export
           </button>
-          <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
-            Animation HTML
+          <button className="button button-motion" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
+            Smart Motion
           </button>
         </div>
       </header>
@@ -1126,6 +1554,20 @@ function App() {
           </section>
 
           <div className={`preview-frame preview-${previewBackground} ${drawMode ? 'is-draw-mode' : ''}`} onDoubleClick={openFilePicker}>
+            <div className="preview-mode-strip">
+              <button
+                className={`draw-switch-button ${drawMode ? 'is-on' : ''}`}
+                type="button"
+                onClick={() => toggleDrawMode(!drawMode)}
+                aria-pressed={drawMode}
+              >
+                <span className="switch-dot" aria-hidden="true" />
+                {drawMode ? 'Zeichnen an' : 'Zeichnen aus'}
+              </button>
+              <button className="motion-mini-button" type="button" disabled={!hasArtwork} onClick={replayMotionPreview}>
+                Smart Motion ansehen
+              </button>
+            </div>
             <canvas
               ref={previewCanvasRef}
               className={`preview-canvas ${drawMode ? 'is-drawable' : ''}`}
@@ -1174,7 +1616,14 @@ function App() {
               <h2>Steuerung</h2>
               <p>{status}</p>
             </div>
-            <button className="button button-compact" type="button" onClick={() => setSettings(DEFAULT_SETTINGS)}>
+            <button
+              className="button button-compact"
+              type="button"
+              onClick={() => {
+                pushUndoSnapshot('Zurücksetzen')
+                setSettings(DEFAULT_SETTINGS)
+              }}
+            >
               Zurücksetzen
             </button>
           </div>
@@ -1200,24 +1649,26 @@ function App() {
             </div>
           </section>
 
-          <section className="control-section">
-            <h3>Vorlagen</h3>
-            <div className="preset-grid">
-              {PRESETS.map((preset) => (
-                <button className="preset-button" type="button" key={preset.name} onClick={() => applyPreset(preset.settings)}>
-                  {preset.name}
-                </button>
-              ))}
+          <section className="control-section motion-control-section">
+            <div className="section-heading-row">
+              <h3>Smart Motion</h3>
+              <button className="button button-compact" type="button" disabled={!hasArtwork} onClick={replayMotionPreview}>
+                Replay
+              </button>
             </div>
-            <button className="button full-width" type="button" onClick={randomizeSettings}>
-              Fein zufällig abstimmen
+            <MotionPreview grid={activeGrid} settings={settings} playKey={motionPlayKey} />
+            <button className="button button-motion full-width" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
+              Smart-Motion HTML exportieren
             </button>
           </section>
 
           <section className="control-section">
             <h3>Pixel zeichnen</h3>
-            <label className="toggle-control">
-              <span>Zeichenmodus</span>
+            <label className="draw-toggle-card">
+              <span>
+                <strong>{drawMode ? 'Zeichnen ist aktiv' : 'Zeichnen ist aus'}</strong>
+                <small>{drawMode ? 'Canvas nimmt Mausklicks als Pixel auf.' : 'Canvas ist nur Vorschau und Exportfläche.'}</small>
+              </span>
               <input className="toggle-input" type="checkbox" checked={drawMode} onChange={(event) => toggleDrawMode(event.target.checked)} />
               <span className="switch-track" aria-hidden="true" />
             </label>
@@ -1258,6 +1709,57 @@ function App() {
           </section>
 
           <section className="control-section">
+            <div className="section-heading-row">
+              <h3>Logo-Vorlagen</h3>
+              <button className="button button-compact" type="button" onClick={generateRandomLogoRecipe}>
+                1000 Mix
+              </button>
+            </div>
+            <div className="logo-recipe-grid">
+              {LOGO_RECIPES.map((recipe) => (
+                <button className="logo-recipe-button" type="button" key={recipe.name} onClick={() => void applyLogoRecipe(recipe)}>
+                  {recipe.name}
+                </button>
+              ))}
+            </div>
+            <button className="button button-primary full-width" type="button" onClick={generateRandomLogoRecipe}>
+              Logo random generieren
+            </button>
+            <button className="button full-width" type="button" onClick={generateLogoSeries}>
+              4er Logo-Serie würfeln
+            </button>
+            {logoVariants.length > 0 && (
+              <div className="logo-variant-grid" aria-label="Logo-Varianten">
+                {logoVariants.map((logoVariant) => (
+                  <button
+                    className="logo-variant-card"
+                    type="button"
+                    key={logoVariant.id}
+                    onClick={() => void applyLogoVariant(logoVariant)}
+                  >
+                    <img src={logoVariant.previewUrl} alt="" />
+                    <span>{logoVariant.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="control-section">
+            <h3>Look-Presets</h3>
+            <div className="preset-grid">
+              {PRESETS.map((preset) => (
+                <button className="preset-button" type="button" key={preset.name} onClick={() => applyPreset(preset.settings)}>
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+            <button className="button full-width" type="button" onClick={randomizeSettings}>
+              Fein zufällig abstimmen
+            </button>
+          </section>
+
+          <section className="control-section">
             <h3>Raster</h3>
             <SliderControl label="Rastergröße" min={12} max={80} value={settings.gridSize} onChange={(value) => updateSetting('gridSize', value)} />
             <SliderControl
@@ -1291,6 +1793,14 @@ function App() {
               value={settings.contrast}
               suffix="%"
               onChange={(value) => updateSetting('contrast', value)}
+            />
+            <SliderControl
+              label="Pixelruhe"
+              min={0}
+              max={100}
+              value={settings.pixelSmoothing}
+              suffix="%"
+              onChange={(value) => updateSetting('pixelSmoothing', value)}
             />
           </section>
 
@@ -1355,21 +1865,21 @@ function App() {
               <button
                 type="button"
                 className={previewBackground === 'dark' ? 'is-active' : ''}
-                onClick={() => setPreviewBackground('dark')}
+                onClick={() => updatePreviewBackground('dark')}
               >
                 Dunkel
               </button>
               <button
                 type="button"
                 className={previewBackground === 'light' ? 'is-active' : ''}
-                onClick={() => setPreviewBackground('light')}
+                onClick={() => updatePreviewBackground('light')}
               >
                 Hell
               </button>
               <button
                 type="button"
                 className={previewBackground === 'transparent' ? 'is-active' : ''}
-                onClick={() => setPreviewBackground('transparent')}
+                onClick={() => updatePreviewBackground('transparent')}
               >
                 Transparent
               </button>

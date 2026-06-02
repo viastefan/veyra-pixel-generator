@@ -9,6 +9,14 @@ const toNumber = (value: number) => Number(value.toFixed(3)).toString()
 const escapeAttribute = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+export type SmartMotionElement = {
+  element: GridElement
+  order: number
+  keep: boolean
+  offsetX: number
+  offsetY: number
+}
+
 function getReducedElementIds(grid: GeneratedGrid) {
   const center = grid.outputSize / 2
   const maxDistance = Math.hypot(center, center)
@@ -29,13 +37,32 @@ function getReducedElementIds(grid: GeneratedGrid) {
   )
 }
 
-function animatedElementToSvg(element: GridElement, settings: GeneratorSettings, order: number, keep: boolean) {
+export function getSmartMotionPlan(grid: GeneratedGrid): SmartMotionElement[] {
+  const keepIds = getReducedElementIds(grid)
+  const sortedElements = [...grid.elements].sort((a, b) => {
+    const distanceA = Math.hypot(a.x - grid.outputSize / 2, a.y - grid.outputSize / 2)
+    const distanceB = Math.hypot(b.x - grid.outputSize / 2, b.y - grid.outputSize / 2)
+    return a.strength - b.strength || distanceA - distanceB
+  })
+  const maxOrder = Math.max(1, sortedElements.length - 1)
+
+  return sortedElements.map((element, index) => ({
+    element,
+    order: Math.round((index / maxOrder) * 1600),
+    keep: keepIds.has(element.id),
+    offsetX: element.x - grid.outputSize / 2,
+    offsetY: element.y - grid.outputSize / 2,
+  }))
+}
+
+function animatedElementToSvg(motionElement: SmartMotionElement, settings: GeneratorSettings) {
+  const { element, order, keep, offsetX, offsetY } = motionElement
   const half = element.size / 2
   const color = escapeAttribute(element.color)
   const className = keep ? 'pixel keep' : 'pixel'
   const commonAttributes = `class="${className}" data-order="${order}" style="--delay:${order}ms;--x:${toNumber(
-    element.x - settings.outputSize / 2,
-  )}px;--y:${toNumber(element.y - settings.outputSize / 2)}px;transform-origin:${toNumber(element.x)}px ${toNumber(element.y)}px"`
+    offsetX,
+  )}px;--y:${toNumber(offsetY)}px;transform-origin:${toNumber(element.x)}px ${toNumber(element.y)}px"`
 
   if (settings.shape === 'circle') {
     return `  <circle ${commonAttributes} cx="${toNumber(element.x)}" cy="${toNumber(element.y)}" r="${toNumber(half)}" fill="${color}" />`
@@ -109,16 +136,10 @@ export function downloadHtml(grid: GeneratedGrid, settings: GeneratorSettings, f
 
 export function generateAnimatedHtml(grid: GeneratedGrid, settings: GeneratorSettings) {
   const background = settings.transparentBg ? '#070B12' : settings.bgColor
-  const keepIds = getReducedElementIds(grid)
-  const sortedElements = [...grid.elements].sort((a, b) => {
-    const distanceA = Math.hypot(a.x - grid.outputSize / 2, a.y - grid.outputSize / 2)
-    const distanceB = Math.hypot(b.x - grid.outputSize / 2, b.y - grid.outputSize / 2)
-    return a.strength - b.strength || distanceA - distanceB
-  })
-  const maxOrder = Math.max(1, sortedElements.length - 1)
+  const motionElements = getSmartMotionPlan(grid)
   const backgroundRect = settings.transparentBg ? '' : `  <rect width="${grid.outputSize}" height="${grid.outputSize}" fill="${escapeAttribute(settings.bgColor)}" />`
-  const pixels = sortedElements
-    .map((element, index) => animatedElementToSvg(element, settings, Math.round((index / maxOrder) * 1600), keepIds.has(element.id)))
+  const pixels = motionElements
+    .map((motionElement) => animatedElementToSvg(motionElement, settings))
     .join('\n')
 
   return `<!doctype html>

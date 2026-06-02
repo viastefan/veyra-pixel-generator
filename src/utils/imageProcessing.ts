@@ -1,6 +1,6 @@
 import type { GeneratedGrid, GeneratorSettings, GridElement, PreviewBackground } from '../types'
 
-const SAMPLE_SCALE = 5
+const SAMPLE_SCALE = 7
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
   smallSquareRatio: 36,
   threshold: 38,
   contrast: 126,
+  pixelSmoothing: 52,
   invert: false,
   tones: 'two',
   shape: 'rounded-square',
@@ -33,6 +34,60 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
   transparentBg: false,
   outputSize: 1200,
   padding: 160,
+}
+
+function stabilizeElements(
+  elements: GridElement[],
+  gridSize: number,
+  threshold: number,
+  pixelSmoothing: number,
+) {
+  const smoothing = clamp(pixelSmoothing / 100, 0, 1)
+
+  if (smoothing < 0.08 || elements.length < 18) {
+    return elements
+  }
+
+  const elementIds = new Set(elements.map((element) => element.id))
+  const neighborOffsets = [
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, -1],
+    [0, 1],
+    [1, -1],
+    [1, 0],
+    [1, 1],
+  ]
+
+  return elements.filter((element) => {
+    let neighbors = 0
+
+    for (const [rowOffset, columnOffset] of neighborOffsets) {
+      const row = element.row + rowOffset
+      const column = element.column + columnOffset
+
+      if (row < 0 || column < 0 || row >= gridSize || column >= gridSize) {
+        continue
+      }
+
+      if (elementIds.has(`${row}-${column}`)) {
+        neighbors += 1
+      }
+    }
+
+    const weak = element.strength < threshold + 0.18 * smoothing
+
+    if (neighbors === 0 && weak) {
+      return false
+    }
+
+    if (neighbors <= 1 && weak && smoothing > 0.42 && elements.length > 90) {
+      return false
+    }
+
+    return true
+  })
 }
 
 export function computePixelGrid(
@@ -50,6 +105,7 @@ export function computePixelGrid(
   const cellSize = innerSize / gridSize
   const threshold = clamp(settings.threshold / 100, 0.01, 0.99)
   const contrast = clamp(settings.contrast / 100, 0.35, 2.6)
+  const smoothing = clamp(settings.pixelSmoothing / 100, 0, 1)
   const elementRatio = clamp(settings.elementSize / 100, 0.08, 1)
   const minRatio = clamp(settings.smallSquareRatio / 100, 0.05, 1)
 
@@ -75,6 +131,8 @@ export function computePixelGrid(
   for (let row = 0; row < gridSize; row += 1) {
     for (let column = 0; column < gridSize; column += 1) {
       let luminanceTotal = 0
+      let strengthTotal = 0
+      let activeSamples = 0
       let samples = 0
 
       for (let y = 0; y < SAMPLE_SCALE; y += 1) {
@@ -86,16 +144,27 @@ export function computePixelGrid(
           const red = imageData[index] * alpha + 255 * (1 - alpha)
           const green = imageData[index + 1] * alpha + 255 * (1 - alpha)
           const blue = imageData[index + 2] * alpha + 255 * (1 - alpha)
-          luminanceTotal += 0.2126 * red + 0.7152 * green + 0.0722 * blue
+          const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+          const sampleBrightness = clamp((luminance / 255 - 0.5) * contrast + 0.5, 0, 1)
+          const sampleStrength = settings.invert ? sampleBrightness : 1 - sampleBrightness
+          luminanceTotal += luminance
+          strengthTotal += sampleStrength
+
+          if (sampleStrength >= threshold * 0.82) {
+            activeSamples += 1
+          }
+
           samples += 1
         }
       }
 
       const rawBrightness = luminanceTotal / samples / 255
       const brightness = clamp((rawBrightness - 0.5) * contrast + 0.5, 0, 1)
-      const strength = settings.invert ? brightness : 1 - brightness
+      const averageStrength = strengthTotal / samples
+      const coverage = activeSamples / samples
+      const strength = clamp(averageStrength * (1 - smoothing * 0.28) + coverage * (smoothing * 0.28), 0, 1)
 
-      if (strength < threshold) {
+      if (strength < threshold + smoothing * 0.03 || coverage < smoothing * 0.04) {
         continue
       }
 
@@ -121,7 +190,7 @@ export function computePixelGrid(
   }
 
   return {
-    elements,
+    elements: stabilizeElements(elements, gridSize, threshold, settings.pixelSmoothing),
     gridSize,
     outputSize,
     padding,
