@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ChangeEvent, DragEvent } from 'react'
-import type { GeneratorSettings, GeneratedGrid, MotifStyle, PreviewBackground, ShapeMode } from './types'
+import type { CSSProperties, ChangeEvent, DragEvent, PointerEvent } from 'react'
+import type { GeneratorSettings, GeneratedGrid, GridElement, MotifStyle, PreviewBackground, ShapeMode } from './types'
 import {
   DEFAULT_SETTINGS,
   computePixelGrid,
@@ -11,11 +11,15 @@ import {
 import { downloadPng } from './utils/pngExport'
 import { createLocalPromptSvg } from './utils/promptMotif'
 import { downloadSvg, generateSvg } from './utils/svgExport'
-import { downloadHtml } from './utils/htmlExport'
+import { downloadAnimatedHtml, downloadHtml } from './utils/htmlExport'
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
 const IMAGE_INPUT_ID = 'veyra-image-input'
 const ACCEPTED_IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|svg)$/i
+type DrawTool = 'primary' | 'secondary' | 'erase' | 'line'
+type ManualPixelValue = 'primary' | 'secondary' | 'erase'
+type ManualPixelMap = Record<string, ManualPixelValue>
+type GridCell = { row: number; column: number }
 
 const SAMPLE_SOURCE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
   <rect width="720" height="720" fill="#f6f8fb"/>
@@ -26,15 +30,22 @@ const SAMPLE_SOURCE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="720" h
 </svg>`
 
 const MOTIF_STYLES: Array<{ value: MotifStyle; label: string }> = [
-  { value: 'monogram', label: 'Monogram' },
+  { value: 'monogram', label: 'Monogramm' },
   { value: 'emblem', label: 'Emblem' },
   { value: 'orbital', label: 'Orbital' },
   { value: 'signal', label: 'Signal' },
 ]
 
+const DRAW_TOOLS: Array<{ value: DrawTool; label: string; description: string }> = [
+  { value: 'primary', label: '✏️ Pixel', description: 'helle Pixel setzen' },
+  { value: 'secondary', label: '🌫️ Schatten', description: 'gedämpfte Pixel setzen' },
+  { value: 'erase', label: '🧽 Radierer', description: 'Pixel entfernen' },
+  { value: 'line', label: '📏 Linie', description: 'gerade Rasterlinie ziehen' },
+]
+
 const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
   {
-    name: 'Veyra Dark',
+    name: 'Veyra Dunkel',
     settings: {
       gridSize: 42,
       elementSize: 84,
@@ -51,7 +62,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
     },
   },
   {
-    name: '1inch style',
+    name: '1inch Stil',
     settings: {
       gridSize: 34,
       elementSize: 90,
@@ -68,7 +79,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
     },
   },
   {
-    name: 'Soft nodes',
+    name: 'Weiche Punkte',
     settings: {
       gridSize: 48,
       elementSize: 76,
@@ -85,7 +96,7 @@ const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
     },
   },
   {
-    name: 'Sharp pixel',
+    name: 'Scharfer Pixel',
     settings: {
       gridSize: 58,
       elementSize: 92,
@@ -121,7 +132,7 @@ function createImageFromBlob(blob: Blob) {
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 
       if (!image.naturalWidth || !image.naturalHeight) {
-        reject(new Error('The image loaded, but it has no readable dimensions.'))
+        reject(new Error('Das Bild wurde geladen, hat aber keine lesbaren Maße.'))
         return
       }
 
@@ -130,7 +141,7 @@ function createImageFromBlob(blob: Blob) {
 
     image.onerror = () => {
       URL.revokeObjectURL(url)
-      reject(new Error('The selected image could not be loaded.'))
+      reject(new Error('Das ausgewählte Bild konnte nicht geladen werden.'))
     }
 
     image.src = url
@@ -145,7 +156,7 @@ function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error('The source preview could not be created.'))
+    reader.onerror = () => reject(new Error('Die Quellvorschau konnte nicht erstellt werden.'))
     reader.readAsDataURL(blob)
   })
 }
@@ -158,6 +169,223 @@ function downloadTextFile(content: string, fileName: string, type: string) {
   anchor.download = fileName
   anchor.click()
   URL.revokeObjectURL(url)
+}
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+const cellKey = (cell: GridCell) => `${cell.row}-${cell.column}`
+
+function parseCellKey(key: string): GridCell | null {
+  const [row, column] = key.split('-').map(Number)
+
+  if (!Number.isInteger(row) || !Number.isInteger(column)) {
+    return null
+  }
+
+  return { row, column }
+}
+
+function createBlankGrid(settings: GeneratorSettings): GeneratedGrid {
+  const gridSize = Math.round(clampNumber(settings.gridSize, 8, 96))
+  const outputSize = Math.round(clampNumber(settings.outputSize, 512, 2400))
+  const padding = Math.round(clampNumber(settings.padding, 0, outputSize * 0.42))
+  const innerSize = Math.max(outputSize - padding * 2, outputSize * 0.1)
+
+  return {
+    elements: [],
+    gridSize,
+    outputSize,
+    padding,
+    cellSize: innerSize / gridSize,
+    sourceWidth: gridSize,
+    sourceHeight: gridSize,
+  }
+}
+
+function getManualElement(grid: GeneratedGrid, settings: GeneratorSettings, cell: GridCell, tone: 'primary' | 'secondary') {
+  const size = grid.cellSize * clampNumber(settings.elementSize / 100, 0.08, 1)
+  const color = tone === 'primary' ? settings.primaryColor : settings.secondaryColor
+
+  return {
+    id: cellKey(cell),
+    row: cell.row,
+    column: cell.column,
+    x: grid.padding + cell.column * grid.cellSize + grid.cellSize / 2,
+    y: grid.padding + cell.row * grid.cellSize + grid.cellSize / 2,
+    size,
+    brightness: tone === 'primary' ? 0 : 0.36,
+    strength: tone === 'primary' ? 1 : 0.62,
+    tone,
+    color,
+  }
+}
+
+function applyManualPixels(grid: GeneratedGrid, edits: ManualPixelMap, settings: GeneratorSettings): GeneratedGrid {
+  const editedElements: GridElement[] = []
+  const existingKeys = new Set<string>()
+
+  for (const element of grid.elements) {
+    existingKeys.add(element.id)
+    const edit = edits[element.id]
+
+    if (edit === 'erase') {
+      continue
+    }
+
+    if (edit === 'primary' || edit === 'secondary') {
+      editedElements.push(getManualElement(grid, settings, element, edit))
+      continue
+    }
+
+    editedElements.push(element)
+  }
+
+  for (const [key, edit] of Object.entries(edits)) {
+    if (edit === 'erase' || existingKeys.has(key)) {
+      continue
+    }
+
+    const cell = parseCellKey(key)
+
+    if (!cell || cell.row < 0 || cell.column < 0 || cell.row >= grid.gridSize || cell.column >= grid.gridSize) {
+      continue
+    }
+
+    editedElements.push(getManualElement(grid, settings, cell, edit))
+  }
+
+  return {
+    ...grid,
+    elements: editedElements,
+  }
+}
+
+function getBrushCells(center: GridCell, gridSize: number, brushSize: number) {
+  const cells: GridCell[] = []
+  const radius = Math.max(0, Math.floor((brushSize - 1) / 2))
+
+  for (let row = center.row - radius; row <= center.row + radius; row += 1) {
+    for (let column = center.column - radius; column <= center.column + radius; column += 1) {
+      if (row >= 0 && column >= 0 && row < gridSize && column < gridSize) {
+        cells.push({ row, column })
+      }
+    }
+  }
+
+  return cells
+}
+
+function getLineCells(start: GridCell, end: GridCell) {
+  const cells: GridCell[] = []
+  let x0 = start.column
+  let y0 = start.row
+  const x1 = end.column
+  const y1 = end.row
+  const dx = Math.abs(x1 - x0)
+  const sx = x0 < x1 ? 1 : -1
+  const dy = -Math.abs(y1 - y0)
+  const sy = y0 < y1 ? 1 : -1
+  let error = dx + dy
+
+  while (true) {
+    cells.push({ row: y0, column: x0 })
+
+    if (x0 === x1 && y0 === y1) {
+      break
+    }
+
+    const doubleError = 2 * error
+
+    if (doubleError >= dy) {
+      error += dy
+      x0 += sx
+    }
+
+    if (doubleError <= dx) {
+      error += dx
+      y0 += sy
+    }
+  }
+
+  return cells
+}
+
+function drawRasterOverlay(
+  context: CanvasRenderingContext2D,
+  grid: GeneratedGrid,
+  hoverCell: GridCell | null,
+  showRaster: boolean,
+) {
+  if (showRaster) {
+    context.save()
+    context.strokeStyle = 'rgba(232, 237, 244, 0.08)'
+    context.lineWidth = Math.max(1, grid.outputSize / 1400)
+
+    for (let index = 0; index <= grid.gridSize; index += 1) {
+      const position = grid.padding + index * grid.cellSize
+      context.beginPath()
+      context.moveTo(grid.padding, position)
+      context.lineTo(grid.outputSize - grid.padding, position)
+      context.stroke()
+      context.beginPath()
+      context.moveTo(position, grid.padding)
+      context.lineTo(position, grid.outputSize - grid.padding)
+      context.stroke()
+    }
+
+    context.restore()
+  }
+
+  if (!hoverCell) {
+    return
+  }
+
+  context.save()
+  context.strokeStyle = 'rgba(232, 237, 244, 0.8)'
+  context.lineWidth = Math.max(2, grid.outputSize / 900)
+  context.strokeRect(
+    grid.padding + hoverCell.column * grid.cellSize,
+    grid.padding + hoverCell.row * grid.cellSize,
+    grid.cellSize,
+    grid.cellSize,
+  )
+  context.restore()
+}
+
+function drawLinePreview(
+  context: CanvasRenderingContext2D,
+  grid: GeneratedGrid,
+  start: GridCell | null,
+  end: GridCell | null,
+  brushSize: number,
+) {
+  if (!start || !end) {
+    return
+  }
+
+  const previewCells = new Map<string, GridCell>()
+
+  for (const lineCell of getLineCells(start, end)) {
+    for (const brushCell of getBrushCells(lineCell, grid.gridSize, brushSize)) {
+      previewCells.set(cellKey(brushCell), brushCell)
+    }
+  }
+
+  context.save()
+  context.fillStyle = 'rgba(232, 237, 244, 0.22)'
+  context.strokeStyle = 'rgba(232, 237, 244, 0.68)'
+  context.lineWidth = Math.max(1, grid.outputSize / 1200)
+
+  for (const cell of previewCells.values()) {
+    const inset = grid.cellSize * 0.18
+    const x = grid.padding + cell.column * grid.cellSize + inset
+    const y = grid.padding + cell.row * grid.cellSize + inset
+    const size = grid.cellSize - inset * 2
+    context.fillRect(x, y, size, size)
+    context.strokeRect(x, y, size, size)
+  }
+
+  context.restore()
 }
 
 function SliderControl({
@@ -232,14 +460,25 @@ function App() {
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false)
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState('')
   const [sourceSvg, setSourceSvg] = useState('')
-  const [sourceLabel, setSourceLabel] = useState('No source loaded')
-  const [status, setStatus] = useState('Load, drop, or paste an image.')
+  const [sourceLabel, setSourceLabel] = useState('Keine Quelle geladen')
+  const [manualPixels, setManualPixels] = useState<ManualPixelMap>({})
+  const [drawTool, setDrawTool] = useState<DrawTool>('primary')
+  const [brushSize, setBrushSize] = useState(1)
+  const [hoverCell, setHoverCell] = useState<GridCell | null>(null)
+  const [lineStart, setLineStart] = useState<GridCell | null>(null)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [blankMode, setBlankMode] = useState(false)
+  const [drawMode, setDrawMode] = useState(false)
+  const [showRaster, setShowRaster] = useState(true)
+  const [status, setStatus] = useState('Bild laden, einfügen oder direkt zeichnen.')
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const processingCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const dragDepthRef = useRef(0)
   const motifStyleRef = useRef<MotifStyle>('monogram')
+  const lastPaintedKeyRef = useRef('')
+  const lastPaintedCellRef = useRef<GridCell | null>(null)
 
   const updateSetting = useCallback(<Key extends keyof GeneratorSettings>(key: Key, value: GeneratorSettings[Key]) => {
     setSettings((current) => ({
@@ -250,34 +489,37 @@ function App() {
 
   const loadImageFile = useCallback(async (file: File, options: { sourceSvg?: string; sourceLabel?: string } = {}) => {
     if (!isSupportedImage(file)) {
-      setStatus('Use PNG, JPG, JPEG, WEBP, or SVG.')
+      setStatus('Nutze PNG, JPG, JPEG, WEBP oder SVG.')
       return
     }
 
     if (file.size === 0) {
-      setStatus('That image file is empty.')
+      setStatus('Diese Bilddatei ist leer.')
       return
     }
 
     try {
       setIsLoadingImage(true)
-      setStatus(`Loading ${file.name || 'image'}...`)
+      setStatus(`${file.name || 'Bild'} wird geladen...`)
       const nextImage = await createImageFromBlob(file)
       const previewUrl = await readBlobAsDataUrl(file)
       setImage(nextImage)
-      setImageName(file.name || 'Clipboard image')
+      setImageName(file.name || 'Bild aus der Zwischenablage')
       setSourcePreviewUrl(previewUrl)
       setSourceSvg(options.sourceSvg ?? '')
-      setSourceLabel(options.sourceLabel ?? 'Imported source image')
+      setSourceLabel(options.sourceLabel ?? 'Importierte Quelle')
+      setManualPixels({})
+      setBlankMode(false)
+      setDrawMode(false)
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Image could not be loaded.')
+      setStatus(error instanceof Error ? error.message : 'Bild konnte nicht geladen werden.')
     } finally {
       setIsLoadingImage(false)
     }
   }, [])
 
   const loadSvgSource = useCallback(
-    async (svg: string, fileName: string, sourceLabel = 'Generated source SVG') => {
+    async (svg: string, fileName: string, sourceLabel = 'Erzeugte Quell-SVG') => {
       const file = new File([svg], fileName, { type: 'image/svg+xml' })
       await loadImageFile(file, { sourceSvg: svg, sourceLabel })
     },
@@ -290,7 +532,7 @@ function App() {
     if (file) {
       void loadImageFile(file)
     } else if (event.target.files?.length) {
-      setStatus('Use PNG, JPG, JPEG, WEBP, or SVG.')
+      setStatus('Nutze PNG, JPG, JPEG, WEBP oder SVG.')
     }
 
     event.target.value = ''
@@ -312,7 +554,7 @@ function App() {
       return
     }
 
-    setStatus('Drop an image file to generate a mark.')
+    setStatus('Ziehe eine Bilddatei hierher oder starte mit leerem Raster.')
   }
 
   const handleDragEnter = (event: DragEvent<HTMLElement>) => {
@@ -332,12 +574,12 @@ function App() {
 
   const pasteFromClipboard = useCallback(async () => {
     if (!navigator.clipboard?.read) {
-      setStatus('Press Cmd+V or Ctrl+V after copying an image.')
+      setStatus('Drücke Cmd+V oder Ctrl+V, nachdem du ein Bild kopiert hast.')
       return
     }
 
     try {
-      setStatus('Reading clipboard...')
+      setStatus('Zwischenablage wird gelesen...')
       const items = await navigator.clipboard.read()
 
       for (const item of items) {
@@ -353,14 +595,14 @@ function App() {
         return
       }
 
-      setStatus('Clipboard does not contain an image.')
+      setStatus('In der Zwischenablage ist kein Bild.')
     } catch {
-      setStatus('Clipboard permission was not granted. Try Cmd+V or Ctrl+V.')
+      setStatus('Keine Berechtigung für die Zwischenablage. Probiere Cmd+V oder Ctrl+V.')
     }
   }, [loadImageFile])
 
   const loadSampleSource = useCallback(async () => {
-    await loadSvgSource(SAMPLE_SOURCE_SVG, 'veyra-test-source.svg', 'Test source SVG')
+    await loadSvgSource(SAMPLE_SOURCE_SVG, 'veyra-test-source.svg', 'Testquelle SVG')
   }, [loadSvgSource])
 
   const updateMotifStyle = (style: MotifStyle) => {
@@ -373,13 +615,13 @@ function App() {
     const activeStyle = motifStyleRef.current
 
     if (!cleanPrompt) {
-      setStatus('Enter a prompt first.')
+      setStatus('Gib zuerst einen Prompt ein.')
       return
     }
 
     try {
       setIsGeneratingPrompt(true)
-      setStatus('Generating motif...')
+      setStatus('Motiv wird erzeugt...')
 
       const response = await fetch('/api/generate-pixel-motif', {
         method: 'POST',
@@ -388,20 +630,20 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Claude endpoint is not configured yet. Using local motif generation.')
+        throw new Error('Claude ist noch nicht eingerichtet. Lokale Motiv-Erzeugung wird genutzt.')
       }
 
       const data = (await response.json()) as { svg?: unknown; source?: unknown }
 
       if (typeof data.svg !== 'string' || !data.svg.includes('<svg')) {
-        throw new Error('Claude returned no usable SVG. Using local motif generation.')
+        throw new Error('Claude hat kein nutzbares SVG geliefert. Lokale Motiv-Erzeugung wird genutzt.')
       }
 
-      await loadSvgSource(data.svg, 'claude-pixel-source.svg', `Claude ${activeStyle} source`)
-      setStatus(data.source === 'claude' ? 'Claude motif generated.' : 'Motif generated.')
+      await loadSvgSource(data.svg, 'claude-pixel-source.svg', `Claude ${activeStyle} Quelle`)
+      setStatus(data.source === 'claude' ? 'Claude-Motiv erzeugt.' : 'Motiv erzeugt.')
     } catch {
-      await loadSvgSource(createLocalPromptSvg(cleanPrompt, { style: activeStyle, variant }), 'local-prompt-source.svg', `Local ${activeStyle} source`)
-      setStatus('Local prompt motif generated. Add ANTHROPIC_API_KEY on Vercel to use Claude.')
+      await loadSvgSource(createLocalPromptSvg(cleanPrompt, { style: activeStyle, variant }), 'local-prompt-source.svg', `Lokale ${activeStyle} Quelle`)
+      setStatus('Lokales Prompt-Motiv erzeugt. Setze ANTHROPIC_API_KEY in Vercel, um Claude zu nutzen.')
     } finally {
       setIsGeneratingPrompt(false)
     }
@@ -454,14 +696,172 @@ function App() {
       setGrid(nextGrid)
       setStatus(
         nextGrid.elements.length
-          ? 'Image loaded. Adjust the mark or export it.'
-          : 'No elements generated. Lower the threshold or enable invert.',
+          ? 'Bild geladen. Du kannst es justieren, überzeichnen oder exportieren.'
+          : 'Noch keine Pixel erzeugt. Senke die Schwelle oder aktiviere Invertieren.',
       )
     } catch (error) {
       setGrid(null)
-      setStatus(error instanceof Error ? error.message : 'The mark could not be generated.')
+      setStatus(error instanceof Error ? error.message : 'Das Motiv konnte nicht erzeugt werden.')
     }
   }, [image, settings])
+
+  const blankGrid = useMemo(() => createBlankGrid(settings), [settings])
+
+  const baseGrid = useMemo(() => {
+    if (grid) {
+      return grid
+    }
+
+    if (blankMode || drawMode || Object.keys(manualPixels).length > 0) {
+      return blankGrid
+    }
+
+    return null
+  }, [blankGrid, blankMode, drawMode, grid, manualPixels])
+
+  const activeGrid = useMemo(() => {
+    if (!baseGrid) {
+      return null
+    }
+
+    return applyManualPixels(baseGrid, manualPixels, settings)
+  }, [baseGrid, manualPixels, settings])
+
+  const workingGrid = activeGrid ?? blankGrid
+
+  const manualPixelCount = useMemo(
+    () => Object.values(manualPixels).filter((value) => value === 'primary' || value === 'secondary').length,
+    [manualPixels],
+  )
+
+  const getCellFromPointer = (event: PointerEvent<HTMLCanvasElement>) => {
+    const canvas = previewCanvasRef.current
+
+    if (!canvas) {
+      return null
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    const x = ((event.clientX - rect.left) / rect.width) * workingGrid.outputSize
+    const y = ((event.clientY - rect.top) / rect.height) * workingGrid.outputSize
+    const column = Math.floor((x - workingGrid.padding) / workingGrid.cellSize)
+    const row = Math.floor((y - workingGrid.padding) / workingGrid.cellSize)
+
+    if (row < 0 || column < 0 || row >= workingGrid.gridSize || column >= workingGrid.gridSize) {
+      return null
+    }
+
+    return { row, column }
+  }
+
+  const paintCells = (cells: GridCell[], value: ManualPixelValue) => {
+    if (!cells.length) {
+      return
+    }
+
+    setBlankMode((current) => current || !grid)
+    setManualPixels((current) => {
+      const next = { ...current }
+
+      for (const cell of cells) {
+        next[cellKey(cell)] = value
+      }
+
+      return next
+    })
+  }
+
+  const paintCell = (cell: GridCell) => {
+    const value: ManualPixelValue = drawTool === 'erase' ? 'erase' : drawTool === 'secondary' ? 'secondary' : 'primary'
+    paintCells(getBrushCells(cell, workingGrid.gridSize, brushSize), value)
+  }
+
+  const paintCellPath = (from: GridCell | null, to: GridCell) => {
+    const value: ManualPixelValue = drawTool === 'erase' ? 'erase' : drawTool === 'secondary' ? 'secondary' : 'primary'
+    const pathCells = from ? getLineCells(from, to) : [to]
+    const brushCells = pathCells.flatMap((cell) => getBrushCells(cell, workingGrid.gridSize, brushSize))
+    paintCells(brushCells, value)
+  }
+
+  const handleCanvasPointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!drawMode) {
+      return
+    }
+
+    const cell = getCellFromPointer(event)
+
+    if (!cell) {
+      return
+    }
+
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setHoverCell(cell)
+
+    if (drawTool === 'line') {
+      setLineStart(cell)
+      setStatus('Linie gestartet. Ziehe bis zum Ziel und lass los.')
+      return
+    }
+
+    setIsDrawing(true)
+    lastPaintedKeyRef.current = ''
+    lastPaintedCellRef.current = cell
+    paintCell(cell)
+  }
+
+  const handleCanvasPointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!drawMode) {
+      return
+    }
+
+    const cell = getCellFromPointer(event)
+    setHoverCell(cell)
+
+    if (!cell || !isDrawing || drawTool === 'line') {
+      return
+    }
+
+    const key = cellKey(cell)
+
+    if (key === lastPaintedKeyRef.current) {
+      return
+    }
+
+    lastPaintedKeyRef.current = key
+    paintCellPath(lastPaintedCellRef.current, cell)
+    lastPaintedCellRef.current = cell
+  }
+
+  const handleCanvasPointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!drawMode) {
+      return
+    }
+
+    const cell = getCellFromPointer(event)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    if (drawTool === 'line' && lineStart && cell) {
+      paintCells(getLineCells(lineStart, cell), 'primary')
+      setStatus('Pixellinie gesetzt.')
+    }
+
+    setLineStart(null)
+    setIsDrawing(false)
+    lastPaintedKeyRef.current = ''
+    lastPaintedCellRef.current = null
+  }
+
+  const handleCanvasPointerLeave = () => {
+    setHoverCell(null)
+
+    if (drawTool !== 'line') {
+      setIsDrawing(false)
+      lastPaintedCellRef.current = null
+    }
+  }
 
   useEffect(() => {
     const canvas = previewCanvasRef.current
@@ -479,78 +879,121 @@ function App() {
       return
     }
 
-    if (!grid) {
+    if (!activeGrid) {
       drawEmptyPreview(context, settings.outputSize, settings, previewBackground)
       return
     }
 
-    drawPixelMark(context, grid, resolvePreviewSettings(settings, previewBackground))
-  }, [grid, previewBackground, settings])
+    drawPixelMark(context, activeGrid, resolvePreviewSettings(settings, previewBackground))
+    drawRasterOverlay(context, activeGrid, hoverCell, showRaster)
+    drawLinePreview(context, activeGrid, drawMode && drawTool === 'line' ? lineStart : null, hoverCell, brushSize)
+  }, [activeGrid, brushSize, drawMode, drawTool, hoverCell, lineStart, previewBackground, settings, showRaster])
 
   const sourceMeta = useMemo(() => {
-    if (!grid) {
-      return 'No source loaded'
+    if (!activeGrid) {
+      return 'Keine Quelle geladen'
     }
 
-    return `${grid.sourceWidth} x ${grid.sourceHeight} source, ${grid.elements.length} elements`
-  }, [grid])
+    return `${activeGrid.sourceWidth} x ${activeGrid.sourceHeight} Quelle, ${activeGrid.elements.length} Pixel`
+  }, [activeGrid])
+
+  const hasArtwork = Boolean(activeGrid?.elements.length)
 
   const handleExportPng = async () => {
-    if (!grid) {
-      setStatus('Load an image before exporting PNG.')
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
       return
     }
 
     try {
-      await downloadPng(grid, settings)
-      setStatus('PNG downloaded.')
+      await downloadPng(activeGrid, settings)
+      setStatus('PNG heruntergeladen.')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'PNG export failed.')
+      setStatus(error instanceof Error ? error.message : 'PNG-Export fehlgeschlagen.')
     }
   }
 
   const handleExportSvg = () => {
-    if (!grid) {
-      setStatus('Load an image before exporting SVG.')
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
       return
     }
 
-    downloadSvg(grid, settings)
-    setStatus('SVG export started.')
+    downloadSvg(activeGrid, settings)
+    setStatus('SVG heruntergeladen.')
   }
 
   const handleExportHtml = () => {
-    if (!grid) {
-      setStatus('Load or generate an image before exporting HTML.')
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
       return
     }
 
-    downloadHtml(grid, settings)
-    setStatus('HTML downloaded.')
+    downloadHtml(activeGrid, settings)
+    setStatus('HTML heruntergeladen.')
+  }
+
+  const handleExportAnimatedHtml = () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    downloadAnimatedHtml(activeGrid, settings)
+    setStatus('Animations-HTML heruntergeladen.')
   }
 
   const handleCopySvg = async () => {
-    if (!grid) {
-      setStatus('Load an image before copying SVG.')
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
       return
     }
 
     try {
-      await navigator.clipboard.writeText(generateSvg(grid, settings))
-      setStatus('SVG copied to clipboard.')
+      await navigator.clipboard.writeText(generateSvg(activeGrid, settings))
+      setStatus('SVG in die Zwischenablage kopiert.')
     } catch {
-      setStatus('Clipboard write permission was not granted.')
+      setStatus('Keine Berechtigung zum Schreiben in die Zwischenablage.')
     }
   }
 
   const handleDownloadSourceSvg = () => {
     if (!sourceSvg) {
-      setStatus('Generate a prompt motif before downloading the source SVG.')
+      setStatus('Erzeuge erst ein Prompt-Motiv, um die Quell-SVG zu laden.')
       return
     }
 
     downloadTextFile(sourceSvg, 'veyra-source-motif.svg', 'image/svg+xml;charset=utf-8')
-    setStatus('Source SVG downloaded.')
+    setStatus('Quell-SVG heruntergeladen.')
+  }
+
+  const handleBlankCanvas = () => {
+    setImage(null)
+    setGrid(null)
+    setBlankMode(true)
+    setDrawMode(true)
+    setManualPixels({})
+    setSourcePreviewUrl('')
+    setSourceSvg('')
+    setImageName('Leeres Zeichenraster')
+    setSourceLabel('Manuelles Pixelraster')
+    setStatus('Leeres Raster bereit. Zeichne Pixel oder Linien direkt auf der Fläche.')
+  }
+
+  const handleClearManualPixels = () => {
+    setManualPixels({})
+    setLineStart(null)
+    setStatus('Manuelle Pixel gelöscht.')
+  }
+
+  const toggleDrawMode = (enabled: boolean) => {
+    setDrawMode(enabled)
+    setShowRaster((current) => current || enabled)
+    setStatus(
+      enabled
+        ? 'Zeichenmodus aktiv. Wähle ein Werkzeug und male direkt im Raster.'
+        : 'Zeichenmodus pausiert. Das Motiv bleibt erhalten.',
+    )
   }
 
   const applyPreset = (presetSettings: Partial<GeneratorSettings>) => {
@@ -593,54 +1036,57 @@ function App() {
 
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
+          <img className="brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
           <div>
             <h1>Veyra Pixel Generator</h1>
             <p>{sourceMeta}</p>
           </div>
         </div>
 
-        <div className="toolbar" aria-label="Generator actions">
+        <div className="toolbar" aria-label="Generator-Aktionen">
           <label className="button button-primary upload-label" htmlFor={IMAGE_INPUT_ID}>
-            Load image
+            Bild laden
           </label>
           <button className="button" type="button" onClick={pasteFromClipboard}>
-            Paste from clipboard
+            Einfügen
           </button>
-          <div className="segmented" aria-label="Tone mode">
+          <button className={`button ${drawMode ? 'is-active-button' : ''}`} type="button" onClick={() => toggleDrawMode(!drawMode)}>
+            Pixel zeichnen
+          </button>
+          <div className="segmented" aria-label="Tonmodus">
             <button
               type="button"
               className={settings.tones === 'one' ? 'is-active' : ''}
               onClick={() => updateSetting('tones', 'one')}
             >
-              1 tone
+              1 Ton
             </button>
             <button
               type="button"
               className={settings.tones === 'two' ? 'is-active' : ''}
               onClick={() => updateSetting('tones', 'two')}
             >
-              2 tones
+              2 Töne
             </button>
           </div>
-          <button className="button" type="button" disabled={!grid} onClick={handleExportPng}>
-            Export PNG
+          <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportPng}>
+            PNG Export
           </button>
-          <button className="button" type="button" disabled={!grid} onClick={handleExportSvg}>
-            Export SVG
+          <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportSvg}>
+            SVG Export
           </button>
-          <button className="button" type="button" disabled={!grid} onClick={handleExportHtml}>
-            Export HTML
+          <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
+            Animation HTML
           </button>
         </div>
       </header>
 
       <section className="workspace">
-        <section className="preview-column" aria-label="Generated mark preview">
-          <section className="prompt-panel" aria-label="AI motif generator">
+        <section className="preview-column" aria-label="Vorschau des generierten Zeichens">
+          <section className="prompt-panel" aria-label="KI-Motivgenerator">
             <div className="prompt-copy">
-              <h2>AI motif</h2>
-              <p>Describe a symbol. Claude can generate the source motif; local fallback works immediately.</p>
+              <h2>KI-Motiv</h2>
+              <p>Beschreibe ein Symbol. Claude kann die Quelle erzeugen; der lokale Generator funktioniert sofort.</p>
             </div>
             <div className="prompt-stack">
               <div className="prompt-input-row">
@@ -648,7 +1094,7 @@ function App() {
                   value={prompt}
                   rows={2}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="e.g. abstract Veyra compass, premium modular flower, quiet festival monogram"
+                  placeholder="z. B. abstrakter Veyra-Kompass, modulares Festivalzeichen, ruhiges Monogramm"
                 />
                 <button
                   className="button button-primary prompt-button"
@@ -656,11 +1102,11 @@ function App() {
                   onClick={() => void generatePromptMotif()}
                   disabled={isGeneratingPrompt}
                 >
-                  {isGeneratingPrompt ? 'Generating...' : 'Generate pixel mark'}
+                  {isGeneratingPrompt ? 'Wird erzeugt...' : 'Pixelmark erzeugen'}
                 </button>
               </div>
               <div className="prompt-tools">
-                <div className="segmented prompt-style-control" aria-label="Motif style">
+                <div className="segmented prompt-style-control" aria-label="Motivstil">
                   {MOTIF_STYLES.map((style) => (
                     <button
                       key={style.value}
@@ -673,30 +1119,42 @@ function App() {
                   ))}
                 </div>
                 <button className="button" type="button" onClick={generateNextVariant} disabled={isGeneratingPrompt || !prompt.trim()}>
-                  New variant
+                  Neue Variante
                 </button>
               </div>
             </div>
           </section>
 
-          <div className={`preview-frame preview-${previewBackground}`} onDoubleClick={openFilePicker}>
-            <canvas ref={previewCanvasRef} className="preview-canvas" aria-label="Generated pixel mark preview" />
+          <div className={`preview-frame preview-${previewBackground} ${drawMode ? 'is-draw-mode' : ''}`} onDoubleClick={openFilePicker}>
+            <canvas
+              ref={previewCanvasRef}
+              className={`preview-canvas ${drawMode ? 'is-drawable' : ''}`}
+              aria-label="Vorschau und Pixel-Zeichenfläche"
+              onPointerDown={handleCanvasPointerDown}
+              onPointerMove={handleCanvasPointerMove}
+              onPointerUp={handleCanvasPointerUp}
+              onPointerCancel={handleCanvasPointerUp}
+              onPointerLeave={handleCanvasPointerLeave}
+            />
 
-            {!grid && (
+            {!activeGrid && (
               <div className="empty-state">
                 <div className="empty-card">
-                  <p className="empty-kicker">{isDragging ? 'Release to load' : 'Image input'}</p>
-                  <strong>{isLoadingImage ? 'Loading image...' : 'Drop an image here'}</strong>
-                  <span>PNG, JPG, WEBP, or SVG stays local in your browser.</span>
+                  <p className="empty-kicker">{isDragging ? 'Loslassen zum Laden' : 'Bildeingabe'}</p>
+                  <strong>{isLoadingImage ? 'Bild wird geladen...' : 'Bild hier ablegen'}</strong>
+                  <span>PNG, JPG, WEBP oder SVG bleibt lokal in deinem Browser. Oder starte direkt mit einem leeren Raster.</span>
                   <div className="empty-actions">
                     <label className="button button-primary upload-label" htmlFor={IMAGE_INPUT_ID}>
-                      Choose image
+                      Bild wählen
                     </label>
                     <button className="button" type="button" onClick={pasteFromClipboard}>
-                      Paste image
+                      Bild einfügen
                     </button>
                     <button className="button" type="button" onClick={loadSampleSource}>
-                      Test source
+                      Testquelle
+                    </button>
+                    <button className="button" type="button" onClick={handleBlankCanvas}>
+                      Leeres Raster
                     </button>
                   </div>
                 </div>
@@ -705,45 +1163,45 @@ function App() {
           </div>
 
           <div className="preview-footer">
-            <span>{imageName || 'No image selected'}</span>
-            <span>{settings.outputSize}px export</span>
+            <span>{imageName || 'Noch kein Bild gewählt'}</span>
+            <span>{settings.outputSize}px Export</span>
           </div>
         </section>
 
-        <aside className="controls-panel" aria-label="Generator controls">
+        <aside className="controls-panel" aria-label="Generator-Steuerung">
           <div className="panel-header">
             <div>
-              <h2>Controls</h2>
+              <h2>Steuerung</h2>
               <p>{status}</p>
             </div>
             <button className="button button-compact" type="button" onClick={() => setSettings(DEFAULT_SETTINGS)}>
-              Reset
+              Zurücksetzen
             </button>
           </div>
 
           <section className="control-section">
-            <h3>Source</h3>
+            <h3>Quelle</h3>
             <div className="source-card">
               <div className="source-thumb">
-                {sourcePreviewUrl ? <img src={sourcePreviewUrl} alt="" /> : <span>No source</span>}
+                {sourcePreviewUrl ? <img src={sourcePreviewUrl} alt="" /> : <span>Keine Quelle</span>}
               </div>
               <div>
                 <strong>{sourceLabel}</strong>
-                <p>{imageName || 'Generate or load a source image.'}</p>
+                <p>{imageName || 'Motiv erzeugen, Bild laden oder Raster zeichnen.'}</p>
               </div>
             </div>
             <div className="export-grid">
               <button className="button" type="button" onClick={loadSampleSource}>
-                Test source
+                Testquelle
               </button>
               <button className="button" type="button" disabled={!sourceSvg} onClick={handleDownloadSourceSvg}>
-                Source SVG
+                Quell-SVG
               </button>
             </div>
           </section>
 
           <section className="control-section">
-            <h3>Presets</h3>
+            <h3>Vorlagen</h3>
             <div className="preset-grid">
               {PRESETS.map((preset) => (
                 <button className="preset-button" type="button" key={preset.name} onClick={() => applyPreset(preset.settings)}>
@@ -752,15 +1210,58 @@ function App() {
               ))}
             </div>
             <button className="button full-width" type="button" onClick={randomizeSettings}>
-              Randomize subtle settings
+              Fein zufällig abstimmen
             </button>
           </section>
 
           <section className="control-section">
-            <h3>Grid</h3>
-            <SliderControl label="Grid size" min={12} max={80} value={settings.gridSize} onChange={(value) => updateSetting('gridSize', value)} />
+            <h3>Pixel zeichnen</h3>
+            <label className="toggle-control">
+              <span>Zeichenmodus</span>
+              <input className="toggle-input" type="checkbox" checked={drawMode} onChange={(event) => toggleDrawMode(event.target.checked)} />
+              <span className="switch-track" aria-hidden="true" />
+            </label>
+            <div className="draw-tools" aria-label="Zeichenwerkzeuge">
+              {DRAW_TOOLS.map((tool) => (
+                <button
+                  className={`draw-tool ${drawTool === tool.value ? 'is-active' : ''}`}
+                  type="button"
+                  key={tool.value}
+                  onClick={() => {
+                    setDrawTool(tool.value)
+                    setDrawMode(true)
+                    setStatus(tool.value === 'line' ? 'Linienwerkzeug aktiv. Start und Ziel im Raster wählen.' : `${tool.label} aktiv.`)
+                  }}
+                >
+                  <strong>{tool.label}</strong>
+                  <span>{tool.description}</span>
+                </button>
+              ))}
+            </div>
+            <SliderControl label="Pinselgröße" min={1} max={4} value={brushSize} onChange={setBrushSize} />
+            <label className="toggle-control">
+              <span>Raster anzeigen</span>
+              <input className="toggle-input" type="checkbox" checked={showRaster} onChange={(event) => setShowRaster(event.target.checked)} />
+              <span className="switch-track" aria-hidden="true" />
+            </label>
+            <div className="export-grid">
+              <button className="button" type="button" onClick={handleBlankCanvas}>
+                Leeres Raster
+              </button>
+              <button className="button" type="button" disabled={!manualPixelCount} onClick={handleClearManualPixels}>
+                Pixel löschen
+              </button>
+            </div>
+            <p className="draw-hint">
+              {manualPixelCount} manuelle Pixel. Mit ✏️ und 🌫️ zeichnest du frei, 📏 setzt gerade Pixellinien.
+            </p>
+          </section>
+
+          <section className="control-section">
+            <h3>Raster</h3>
+            <SliderControl label="Rastergröße" min={12} max={80} value={settings.gridSize} onChange={(value) => updateSetting('gridSize', value)} />
             <SliderControl
-              label="Element size"
+              label="Elementgröße"
               min={20}
               max={100}
               value={settings.elementSize}
@@ -768,7 +1269,7 @@ function App() {
               onChange={(value) => updateSetting('elementSize', value)}
             />
             <SliderControl
-              label="Small square ratio"
+              label="Kleine-Pixel-Verhältnis"
               min={8}
               max={80}
               value={settings.smallSquareRatio}
@@ -776,7 +1277,7 @@ function App() {
               onChange={(value) => updateSetting('smallSquareRatio', value)}
             />
             <SliderControl
-              label="Threshold"
+              label="Schwelle"
               min={8}
               max={82}
               value={settings.threshold}
@@ -784,7 +1285,7 @@ function App() {
               onChange={(value) => updateSetting('threshold', value)}
             />
             <SliderControl
-              label="Contrast"
+              label="Kontrast"
               min={50}
               max={220}
               value={settings.contrast}
@@ -794,32 +1295,32 @@ function App() {
           </section>
 
           <section className="control-section">
-            <h3>Shape</h3>
-            <div className="segmented segmented-wide" aria-label="Shape mode">
+            <h3>Form</h3>
+            <div className="segmented segmented-wide" aria-label="Formmodus">
               <button
                 type="button"
                 className={settings.shape === 'square' ? 'is-active' : ''}
                 onClick={() => updateSetting('shape', 'square')}
               >
-                Square
+                Quadrat
               </button>
               <button
                 type="button"
                 className={settings.shape === 'circle' ? 'is-active' : ''}
                 onClick={() => updateSetting('shape', 'circle')}
               >
-                Circle
+                Kreis
               </button>
               <button
                 type="button"
                 className={settings.shape === 'rounded-square' ? 'is-active' : ''}
                 onClick={() => updateSetting('shape', 'rounded-square')}
               >
-                Rounded
+                Gerundet
               </button>
             </div>
             <label className="toggle-control">
-              <span>Invert sampling</span>
+              <span>Sampling invertieren</span>
               <input
                 className="toggle-input"
                 type="checkbox"
@@ -831,13 +1332,13 @@ function App() {
           </section>
 
           <section className="control-section">
-            <h3>Color</h3>
-            <ColorControl label="Background" value={settings.bgColor} onChange={(value) => updateSetting('bgColor', value)} />
-            <ColorControl label="Primary" value={settings.primaryColor} onChange={(value) => updateSetting('primaryColor', value)} />
-            <ColorControl label="Secondary" value={settings.secondaryColor} onChange={(value) => updateSetting('secondaryColor', value)} />
-            <ColorControl label="Accent" value={settings.accentColor} onChange={(value) => updateSetting('accentColor', value)} />
+            <h3>Farbe</h3>
+            <ColorControl label="Hintergrund" value={settings.bgColor} onChange={(value) => updateSetting('bgColor', value)} />
+            <ColorControl label="Primär" value={settings.primaryColor} onChange={(value) => updateSetting('primaryColor', value)} />
+            <ColorControl label="Sekundär" value={settings.secondaryColor} onChange={(value) => updateSetting('secondaryColor', value)} />
+            <ColorControl label="Akzent" value={settings.accentColor} onChange={(value) => updateSetting('accentColor', value)} />
             <label className="toggle-control">
-              <span>Transparent export background</span>
+              <span>Transparenter Export-Hintergrund</span>
               <input
                 className="toggle-input"
                 type="checkbox"
@@ -849,32 +1350,32 @@ function App() {
           </section>
 
           <section className="control-section">
-            <h3>Preview</h3>
-            <div className="segmented segmented-wide" aria-label="Preview background">
+            <h3>Vorschau</h3>
+            <div className="segmented segmented-wide" aria-label="Vorschau-Hintergrund">
               <button
                 type="button"
                 className={previewBackground === 'dark' ? 'is-active' : ''}
                 onClick={() => setPreviewBackground('dark')}
               >
-                Dark
+                Dunkel
               </button>
               <button
                 type="button"
                 className={previewBackground === 'light' ? 'is-active' : ''}
                 onClick={() => setPreviewBackground('light')}
               >
-                Light
+                Hell
               </button>
               <button
                 type="button"
                 className={previewBackground === 'transparent' ? 'is-active' : ''}
                 onClick={() => setPreviewBackground('transparent')}
               >
-                Clear
+                Transparent
               </button>
             </div>
             <SliderControl
-              label="Output size"
+              label="Exportgröße"
               min={640}
               max={2000}
               step={40}
@@ -883,7 +1384,7 @@ function App() {
               onChange={(value) => updateSetting('outputSize', value)}
             />
             <SliderControl
-              label="Padding"
+              label="Rand"
               min={0}
               max={360}
               step={4}
@@ -896,17 +1397,20 @@ function App() {
           <section className="control-section">
             <h3>Export</h3>
             <div className="export-grid">
-              <button className="button" type="button" disabled={!grid} onClick={handleExportPng}>
+              <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportPng}>
                 PNG
               </button>
-              <button className="button" type="button" disabled={!grid} onClick={handleExportSvg}>
+              <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportSvg}>
                 SVG
               </button>
-              <button className="button" type="button" disabled={!grid} onClick={handleCopySvg}>
-                Copy SVG
+              <button className="button" type="button" disabled={!hasArtwork} onClick={handleCopySvg}>
+                SVG kopieren
               </button>
-              <button className="button" type="button" disabled={!grid} onClick={handleExportHtml}>
+              <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportHtml}>
                 HTML
+              </button>
+              <button className="button full-width-button" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
+                Smart-Motion HTML
               </button>
             </div>
           </section>

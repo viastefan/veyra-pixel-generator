@@ -1,43 +1,39 @@
 # Veyra Pixel Generator
 
-A minimal browser-based pixel branding generator for Festag / Veyra marks. The app loads an image locally, samples it into a clean modular grid, and exports high-resolution PNG or editable SVG artwork.
+Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft komplett lokal im Browser, lädt Bilder, erzeugt aus Prompts modulare Motive, erlaubt manuelles Pixelzeichnen und exportiert PNG, SVG, statisches HTML oder Smart-Motion-HTML.
 
-## Features
+## Funktionen
 
-- Load PNG, JPG, JPEG, WEBP, or browser-supported SVG images
-- Drag and drop image loading
-- Paste image from the clipboard with the button or keyboard paste
-- Generate a source motif from a text prompt
-- Prompt styles: Monogram, Emblem, Orbital, and Signal
-- Variant generation for quick alternate motifs
-- Optional Claude-powered motif generation through a Vercel API function
-- Local prompt fallback when no Claude API key is configured
-- Source preview and source SVG download for generated motifs
-- Canvas-based grayscale sampling and pixel mark preview
-- Adjustable grid size, element size, small-square ratio, threshold, contrast, padding, and output size
-- Square, circle, and rounded-square elements
-- One-tone and two-tone generation
-- Dark, light, and transparent preview backgrounds
-- Configurable background, primary, secondary, and accent colors
-- PNG export for clean raster output
-- SVG export with editable `rect` and `circle` elements for Figma
-- HTML export with the generated SVG embedded in a standalone page
-- Copy SVG to clipboard
-- Presets, reset, and subtle randomization
+- Bild laden, per Drag and Drop ablegen oder aus der Zwischenablage einfügen
+- PNG, JPG, JPEG, WEBP und browserunterstützte SVGs
+- Prompt-zu-Motiv mit optionaler Claude-API über Vercel
+- Sofort nutzbarer lokaler Motiv-Fallback ohne API-Key
+- Deutsche Oberfläche
+- Canvas-basierte Bildanalyse mit Raster, Schwelle, Kontrast und Elementgröße
+- 1-Ton- und 2-Ton-Modus
+- Formen: Quadrat, Kreis und gerundetes Quadrat
+- Manuelles Pixelzeichnen direkt auf der Vorschau
+- Werkzeuge für helle Pixel, Schattenpixel, Radierer und gerade Pixellinien
+- Vorlagen, Reset und subtile Zufallsabstimmung
+- PNG-Export für hochauflösende Rasterdateien
+- SVG-Export mit editierbaren `rect`- und `circle`-Elementen für Figma
+- Statischer HTML-Export mit eingebettetem SVG
+- Smart-Motion-HTML: viele Pixel verdichten sich automatisch zu einem reduzierten Mark
+- SVG in die Zwischenablage kopieren
 
-## Install
+## Installation
 
 ```bash
 npm install
 ```
 
-## Run Locally
+## Lokal starten
 
 ```bash
 npm run dev
 ```
 
-Then open the local Vite URL in your browser.
+Danach die angezeigte Vite-URL im Browser öffnen.
 
 ## Build
 
@@ -45,24 +41,21 @@ Then open the local Vite URL in your browser.
 npm run build
 ```
 
-The production build is written to `dist/`.
+Der Produktions-Build landet in `dist/`.
 
-## Export
+## Workflow
 
-1. Type a prompt and choose a motif style, or load/drop/paste an image.
-2. Generate a pixel mark, then use `New variant` to explore alternate source motifs.
-3. Adjust the grid, shape, color, and preview controls.
-4. Use `Source SVG` to download the generated source motif.
-5. Use `Export PNG` for a high-resolution raster file.
-6. Use `Export SVG` to download `veyra-pixel-mark.svg`.
-7. Use `Export HTML` to download `veyra-pixel-mark.html`.
-8. Use `Copy SVG` when you want to paste the generated vector markup elsewhere.
+1. Prompt eingeben, Bild laden, Bild einfügen oder mit `Leeres Raster` direkt zeichnen.
+2. Mit `Pixelmark erzeugen` ein KI-/Fallback-Motiv erstellen oder das Raster manuell bearbeiten.
+3. Im Bereich `Pixel zeichnen` den Zeichenmodus aktivieren und mit ✏️, 🌫️, 🧽 oder 📏 arbeiten.
+4. Rastergröße, Elementgröße, Schwelle, Kontrast, Form und Farben fein einstellen.
+5. Mit `PNG`, `SVG`, `HTML` oder `Smart-Motion HTML` exportieren.
 
-Image processing and export rendering run in the browser. Claude motif generation is optional and runs through the Vercel API function so the API key is not exposed to the browser.
+Bildverarbeitung und Exporte laufen im Browser. Die Claude-Motivgenerierung ist optional und läuft über die Vercel-API-Funktion, damit der API-Key nicht im Browser landet.
 
-## Claude Motif Generation
+## Claude-Motivgenerierung
 
-Set this environment variable in Vercel to enable Claude-backed prompt generation:
+In Vercel diese Environment Variable setzen, um Claude zu aktivieren:
 
 ```bash
 ANTHROPIC_API_KEY=your_api_key
@@ -74,4 +67,4 @@ Optional:
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
 ```
 
-If `ANTHROPIC_API_KEY` is not set, the app still works with its local prompt-to-motif fallback.
+Ohne `ANTHROPIC_API_KEY` bleibt die App vollständig nutzbar und verwendet den lokalen Prompt-Fallback.
