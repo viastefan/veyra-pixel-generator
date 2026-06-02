@@ -1,6 +1,6 @@
 # Veyra Pixel Generator
 
-Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft lokal im Browser, lädt Bilder, erzeugt aus Prompts modulare Motive, erlaubt manuelles Pixelzeichnen, schlägt Logo-Alternativen vor und exportiert PNG, SVG, HTML, Smart-Motion-HTML oder WebM-Video.
+Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App läuft lokal im Browser, lädt Bilder, erzeugt aus Prompts modulare Motive, erlaubt manuelles Pixelzeichnen, schlägt Logo-Alternativen vor und exportiert PNG, SVG, HTML, Brand-Kit-HTML, Smart-Motion-HTML oder WebM-Video.
 
 ## Funktionen
 
@@ -26,6 +26,7 @@ Minimaler browserbasierter Pixel-Branding-Generator für Festag / Veyra. Die App
 - PNG-Export für hochauflösende Rasterdateien
 - SVG-Export mit editierbaren `rect`- und `circle`-Elementen für Figma
 - Statischer HTML-Export mit eingebettetem SVG
+- Brand-Kit-HTML mit Logo, Palette, Specs, Usage Checks und editierbarem SVG-Code
 - Smart-Motion-HTML: viele Pixel verdichten sich automatisch zu einem reduzierten Mark
 - Smart-Motion-WebM-Videoexport ohne externe Bildschirmaufnahme
 - SVG in die Zwischenablage kopieren
@@ -62,7 +63,7 @@ Der Produktions-Build landet in `dist/`.
 6. Über `Logo-Vorlagen`, `1000 Mix` oder `16 Logo-Alternativen` neue Markenrichtungen erzeugen.
 7. Rastergröße, Elementgröße, Schwelle, Kontrast, Form und Farben fein einstellen.
 8. Mit `Pixelruhe` störende Einzelpixel reduzieren oder mehr feine Details zulassen.
-9. Mit `PNG`, `SVG`, `HTML`, `Smart-Motion HTML` oder `Video` exportieren.
+9. Mit `PNG`, `SVG`, `HTML`, `Brand Kit`, `Smart-Motion HTML` oder `Video` exportieren.
 
 ## Kommerzielle Nutzung
 

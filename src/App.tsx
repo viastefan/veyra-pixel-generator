@@ -13,6 +13,7 @@ import { createLocalPromptSvg } from './utils/promptMotif'
 import { downloadSvg, generateSvg } from './utils/svgExport'
 import { downloadAnimatedHtml, downloadHtml, getSmartMotionPlan } from './utils/htmlExport'
 import { downloadSmartMotionVideo } from './utils/videoExport'
+import { downloadBrandKitHtml } from './utils/brandKitExport'
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
 const IMAGE_INPUT_ID = 'veyra-image-input'
@@ -1441,6 +1442,24 @@ function App() {
     setStatus('HTML heruntergeladen.')
   }
 
+  const handleExportBrandKit = () => {
+    if (!activeGrid || !activeGrid.elements.length) {
+      setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
+      return
+    }
+
+    downloadBrandKitHtml(activeGrid, settings, {
+      prompt,
+      sourceLabel,
+      imageName,
+      generatedAt: new Intl.DateTimeFormat('de-DE', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date()),
+    })
+    setStatus('Brand Kit heruntergeladen.')
+  }
+
   const handleExportAnimatedHtml = () => {
     if (!activeGrid || !activeGrid.elements.length) {
       setStatus('Erzeuge oder zeichne zuerst ein Motiv.')
@@ -1819,6 +1838,9 @@ function App() {
           </button>
           <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportSvg}>
             SVG Export
+          </button>
+          <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportBrandKit}>
+            Brand Kit
           </button>
           <button className="button button-motion" type="button" disabled={!hasArtwork} onClick={handleExportAnimatedHtml}>
             Smart Motion
@@ -2287,6 +2309,9 @@ function App() {
               </button>
               <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportHtml}>
                 HTML
+              </button>
+              <button className="button" type="button" disabled={!hasArtwork} onClick={handleExportBrandKit}>
+                Brand Kit
               </button>
               <button className="button" type="button" disabled={!hasArtwork || isExportingVideo} onClick={() => void handleExportVideo()}>
                 {isExportingVideo ? 'Video...' : 'Video'}
