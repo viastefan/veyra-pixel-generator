@@ -14,16 +14,20 @@ export function downloadPng(grid: GeneratedGrid, settings: GeneratorSettings, fi
 
   drawPixelMark(context, grid, settings)
 
-  canvas.toBlob((blob) => {
-    if (!blob) {
-      return
-    }
+  return new Promise<void>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('PNG export failed. The browser did not create a file.'))
+        return
+      }
 
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = fileName
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }, 'image/png')
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = fileName
+      anchor.click()
+      URL.revokeObjectURL(url)
+      resolve()
+    }, 'image/png')
+  })
 }

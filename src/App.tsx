@@ -9,9 +9,21 @@ import {
   resolvePreviewSettings,
 } from './utils/imageProcessing'
 import { downloadPng } from './utils/pngExport'
+import { createLocalPromptSvg } from './utils/promptMotif'
 import { downloadSvg, generateSvg } from './utils/svgExport'
+import { downloadHtml } from './utils/htmlExport'
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']
+const IMAGE_INPUT_ID = 'veyra-image-input'
+const ACCEPTED_IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|svg)$/i
+
+const SAMPLE_SOURCE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
+  <rect width="720" height="720" fill="#f6f8fb"/>
+  <path d="M360 96 560 252v216L360 624 160 468V252L360 96Z" fill="#101821"/>
+  <path d="M360 166 500 275v170L360 554 220 445V275L360 166Z" fill="#f6f8fb"/>
+  <path d="M360 240 444 305v110L360 480 276 415V305L360 240Z" fill="#101821"/>
+  <rect x="334" y="92" width="52" height="536" fill="#101821"/>
+</svg>`
 
 const PRESETS: Array<{ name: string; settings: Partial<GeneratorSettings> }> = [
   {
@@ -89,16 +101,23 @@ function isSupportedImage(file: File) {
     return true
   }
 
-  return /\.(png|jpe?g|webp|svg)$/i.test(file.name)
+  return ACCEPTED_IMAGE_EXTENSIONS.test(file.name)
 }
 
-function createImageFromFile(file: File) {
+function createImageFromBlob(blob: Blob) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
-    const url = URL.createObjectURL(file)
+    const url = URL.createObjectURL(blob)
     const image = new Image()
+    image.decoding = 'async'
 
     image.onload = () => {
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+
+      if (!image.naturalWidth || !image.naturalHeight) {
+        reject(new Error('The image loaded, but it has no readable dimensions.'))
+        return
+      }
+
       resolve(image)
     }
 
@@ -109,6 +128,10 @@ function createImageFromFile(file: File) {
 
     image.src = url
   })
+}
+
+function getImageFileFromList(files: FileList | File[]) {
+  return Array.from(files).find(isSupportedImage) ?? null
 }
 
 function SliderControl({
@@ -176,11 +199,15 @@ function App() {
   const [grid, setGrid] = useState<GeneratedGrid | null>(null)
   const [previewBackground, setPreviewBackground] = useState<PreviewBackground>('dark')
   const [isDragging, setIsDragging] = useState(false)
+  const [isLoadingImage, setIsLoadingImage] = useState(false)
+  const [prompt, setPrompt] = useState('minimal Veyra monogram, modular premium festival mark')
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false)
   const [status, setStatus] = useState('Load, drop, or paste an image.')
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const processingCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const dragDepthRef = useRef(0)
 
   const updateSetting = useCallback(<Key extends keyof GeneratorSettings>(key: Key, value: GeneratorSettings[Key]) => {
     setSettings((current) => ({
@@ -195,31 +222,54 @@ function App() {
       return
     }
 
+    if (file.size === 0) {
+      setStatus('That image file is empty.')
+      return
+    }
+
     try {
-      const nextImage = await createImageFromFile(file)
+      setIsLoadingImage(true)
+      setStatus(`Loading ${file.name || 'image'}...`)
+      const nextImage = await createImageFromBlob(file)
       setImage(nextImage)
       setImageName(file.name || 'Clipboard image')
-      setStatus('Image loaded. Adjust the mark or export it.')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Image could not be loaded.')
+    } finally {
+      setIsLoadingImage(false)
     }
   }, [])
 
+  const loadSvgSource = useCallback(
+    async (svg: string, fileName: string) => {
+      const file = new File([svg], fileName, { type: 'image/svg+xml' })
+      await loadImageFile(file)
+    },
+    [loadImageFile],
+  )
+
   const handleFileInput = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+    const file = event.target.files ? getImageFileFromList(event.target.files) : null
 
     if (file) {
       void loadImageFile(file)
+    } else if (event.target.files?.length) {
+      setStatus('Use PNG, JPG, JPEG, WEBP, or SVG.')
     }
 
     event.target.value = ''
   }
 
+  const openFilePicker = () => {
+    fileInputRef.current?.click()
+  }
+
   const handleDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault()
+    dragDepthRef.current = 0
     setIsDragging(false)
 
-    const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith('image/'))
+    const file = getImageFileFromList(event.dataTransfer.files)
 
     if (file) {
       void loadImageFile(file)
@@ -229,13 +279,29 @@ function App() {
     setStatus('Drop an image file to generate a mark.')
   }
 
+  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    dragDepthRef.current += 1
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+
+    if (dragDepthRef.current === 0) {
+      setIsDragging(false)
+    }
+  }
+
   const pasteFromClipboard = useCallback(async () => {
     if (!navigator.clipboard?.read) {
-      setStatus('Clipboard image access is not available in this browser.')
+      setStatus('Press Cmd+V or Ctrl+V after copying an image.')
       return
     }
 
     try {
+      setStatus('Reading clipboard...')
       const items = await navigator.clipboard.read()
 
       for (const item of items) {
@@ -253,12 +319,62 @@ function App() {
 
       setStatus('Clipboard does not contain an image.')
     } catch {
-      setStatus('Clipboard permission was not granted.')
+      setStatus('Clipboard permission was not granted. Try Cmd+V or Ctrl+V.')
     }
   }, [loadImageFile])
 
+  const loadSampleSource = useCallback(async () => {
+    await loadSvgSource(SAMPLE_SOURCE_SVG, 'veyra-test-source.svg')
+  }, [loadSvgSource])
+
+  const generatePromptMotif = async () => {
+    const cleanPrompt = prompt.trim()
+
+    if (!cleanPrompt) {
+      setStatus('Enter a prompt first.')
+      return
+    }
+
+    try {
+      setIsGeneratingPrompt(true)
+      setStatus('Generating motif...')
+
+      const response = await fetch('/api/generate-pixel-motif', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: cleanPrompt }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Claude endpoint is not configured yet. Using local motif generation.')
+      }
+
+      const data = (await response.json()) as { svg?: unknown; source?: unknown }
+
+      if (typeof data.svg !== 'string' || !data.svg.includes('<svg')) {
+        throw new Error('Claude returned no usable SVG. Using local motif generation.')
+      }
+
+      await loadSvgSource(data.svg, 'claude-pixel-source.svg')
+      setStatus(data.source === 'claude' ? 'Claude motif generated.' : 'Motif generated.')
+    } catch {
+      await loadSvgSource(createLocalPromptSvg(cleanPrompt), 'local-prompt-source.svg')
+      setStatus('Local prompt motif generated. Add ANTHROPIC_API_KEY on Vercel to use Claude.')
+    } finally {
+      setIsGeneratingPrompt(false)
+    }
+  }
+
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
+      const fileFromList = event.clipboardData?.files ? getImageFileFromList(event.clipboardData.files) : null
+
+      if (fileFromList) {
+        event.preventDefault()
+        void loadImageFile(fileFromList)
+        return
+      }
+
       const item = Array.from(event.clipboardData?.items ?? []).find((candidate) => candidate.type.startsWith('image/'))
 
       if (!item) {
@@ -286,8 +402,15 @@ function App() {
     }
 
     try {
-      setGrid(computePixelGrid(image, processingCanvasRef.current, settings))
+      const nextGrid = computePixelGrid(image, processingCanvasRef.current, settings)
+      setGrid(nextGrid)
+      setStatus(
+        nextGrid.elements.length
+          ? 'Image loaded. Adjust the mark or export it.'
+          : 'No elements generated. Lower the threshold or enable invert.',
+      )
     } catch (error) {
+      setGrid(null)
       setStatus(error instanceof Error ? error.message : 'The mark could not be generated.')
     }
   }, [image, settings])
@@ -324,14 +447,18 @@ function App() {
     return `${grid.sourceWidth} x ${grid.sourceHeight} source, ${grid.elements.length} elements`
   }, [grid])
 
-  const handleExportPng = () => {
+  const handleExportPng = async () => {
     if (!grid) {
       setStatus('Load an image before exporting PNG.')
       return
     }
 
-    downloadPng(grid, settings)
-    setStatus('PNG export started.')
+    try {
+      await downloadPng(grid, settings)
+      setStatus('PNG downloaded.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'PNG export failed.')
+    }
   }
 
   const handleExportSvg = () => {
@@ -342,6 +469,16 @@ function App() {
 
     downloadSvg(grid, settings)
     setStatus('SVG export started.')
+  }
+
+  const handleExportHtml = () => {
+    if (!grid) {
+      setStatus('Load or generate an image before exporting HTML.')
+      return
+    }
+
+    downloadHtml(grid, settings)
+    setStatus('HTML downloaded.')
   }
 
   const handleCopySvg = async () => {
@@ -381,15 +518,14 @@ function App() {
   return (
     <main
       className={`app-shell ${isDragging ? 'is-dragging' : ''}`}
-      onDragOver={(event) => {
-        event.preventDefault()
-        setIsDragging(true)
-      }}
-      onDragLeave={() => setIsDragging(false)}
+      onDragEnter={handleDragEnter}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       style={{ '--accent-color': settings.accentColor } as CSSProperties}
     >
       <input
+        id={IMAGE_INPUT_ID}
         ref={fileInputRef}
         className="file-input"
         type="file"
@@ -407,9 +543,9 @@ function App() {
         </div>
 
         <div className="toolbar" aria-label="Generator actions">
-          <button className="button button-primary" type="button" onClick={() => fileInputRef.current?.click()}>
+          <label className="button button-primary upload-label" htmlFor={IMAGE_INPUT_ID}>
             Load image
-          </button>
+          </label>
           <button className="button" type="button" onClick={pasteFromClipboard}>
             Paste from clipboard
           </button>
@@ -435,17 +571,53 @@ function App() {
           <button className="button" type="button" disabled={!grid} onClick={handleExportSvg}>
             Export SVG
           </button>
+          <button className="button" type="button" disabled={!grid} onClick={handleExportHtml}>
+            Export HTML
+          </button>
         </div>
       </header>
 
       <section className="workspace">
         <section className="preview-column" aria-label="Generated mark preview">
-          <div className={`preview-frame preview-${previewBackground}`}>
+          <section className="prompt-panel" aria-label="AI motif generator">
+            <div className="prompt-copy">
+              <h2>AI motif</h2>
+              <p>Describe a symbol. Claude can generate the source motif; local fallback works immediately.</p>
+            </div>
+            <div className="prompt-input-row">
+              <textarea
+                value={prompt}
+                rows={2}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="e.g. abstract Veyra compass, premium modular flower, quiet festival monogram"
+              />
+              <button className="button button-primary prompt-button" type="button" onClick={generatePromptMotif} disabled={isGeneratingPrompt}>
+                {isGeneratingPrompt ? 'Generating...' : 'Generate pixel mark'}
+              </button>
+            </div>
+          </section>
+
+          <div className={`preview-frame preview-${previewBackground}`} onDoubleClick={openFilePicker}>
             <canvas ref={previewCanvasRef} className="preview-canvas" aria-label="Generated pixel mark preview" />
 
             {!grid && (
               <div className="empty-state">
-                <span>Drop or paste an image</span>
+                <div className="empty-card">
+                  <p className="empty-kicker">{isDragging ? 'Release to load' : 'Image input'}</p>
+                  <strong>{isLoadingImage ? 'Loading image...' : 'Drop an image here'}</strong>
+                  <span>PNG, JPG, WEBP, or SVG stays local in your browser.</span>
+                  <div className="empty-actions">
+                    <label className="button button-primary upload-label" htmlFor={IMAGE_INPUT_ID}>
+                      Choose image
+                    </label>
+                    <button className="button" type="button" onClick={pasteFromClipboard}>
+                      Paste image
+                    </button>
+                    <button className="button" type="button" onClick={loadSampleSource}>
+                      Test source
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -629,6 +801,9 @@ function App() {
               </button>
               <button className="button" type="button" disabled={!grid} onClick={handleCopySvg}>
                 Copy SVG
+              </button>
+              <button className="button" type="button" disabled={!grid} onClick={handleExportHtml}>
+                HTML
               </button>
             </div>
           </section>
